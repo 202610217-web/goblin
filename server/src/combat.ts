@@ -30,13 +30,13 @@ export interface Combat {
 }
 
 /** 경기 시작 시 상태 */
-export function newCombat(): Combat {
-  return { hp: MAX_HP, state: "NORMAL", deathAt: null, invulnUntil: 0, lastAttackAt: 0, downs: 0, deaths: 0, revive: null };
+export function newCombat(maxHp = MAX_HP): Combat {
+  return { hp: maxHp, state: "NORMAL", deathAt: null, invulnUntil: 0, lastAttackAt: 0, downs: 0, deaths: 0, revive: null };
 }
 
 /** 라운드 시작: 체력/상태 초기화 (사망자도 부활). 누적 기절/사망 횟수는 유지 */
-export function resetForRound(c: Combat): Combat {
-  return { ...newCombat(), downs: c.downs, deaths: c.deaths };
+export function resetForRound(c: Combat, maxHp = MAX_HP): Combat {
+  return { ...newCombat(maxHp), downs: c.downs, deaths: c.deaths };
 }
 
 /** 전투가 가능한 단계 */
@@ -52,11 +52,11 @@ export function isHittable(c: Combat, now: number): boolean {
 export type AttackRejectReason = "wrong_phase" | "not_normal" | "busy" | "cooldown";
 
 /** 타격 가능 여부. busy = 집 작업 중이거나 치유 중 */
-export function checkAttack(c: Combat, phase: Phase, busy: boolean, now: number): AttackRejectReason | null {
+export function checkAttack(c: Combat, phase: Phase, busy: boolean, now: number, cooldownMs = ATTACK_COOLDOWN_MS): AttackRejectReason | null {
   if (!isCombatPhase(phase)) return "wrong_phase";
   if (c.state !== "NORMAL") return "not_normal";
   if (busy || c.revive) return "busy";
-  if (now - c.lastAttackAt < ATTACK_COOLDOWN_MS) return "cooldown";
+  if (now - c.lastAttackAt < cooldownMs) return "cooldown";
   return null;
 }
 
@@ -99,12 +99,12 @@ export function stopRevive(reviver: Combat): Combat {
 }
 
 /** 치유 완료: 기절한 대상이 최대 체력의 30%로 정상 복귀 + 무적 */
-export function completeRevive(target: Combat, now: number): Combat {
+export function completeRevive(target: Combat, now: number, maxHp = MAX_HP): Combat {
   if (target.state !== "DOWNED") return target;
   return {
     ...target,
     state: "NORMAL",
-    hp: Math.max(1, Math.round(MAX_HP * REVIVE_HP_RATIO)),
+    hp: Math.max(1, Math.round(maxHp * REVIVE_HP_RATIO)),
     deathAt: null,
     invulnUntil: now + REVIVE_INVULN_MS,
   };

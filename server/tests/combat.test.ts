@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CLASSES, isClassId } from "../../shared/classes";
 import {
   ATTACK_COOLDOWN_MS, DOWN_TO_DEATH_MS, HIT_DAMAGE, MAX_HP, REVIVE_HP_RATIO, REVIVE_INVULN_MS, REVIVE_TIME_MS,
 } from "../src/constants";
@@ -157,5 +158,25 @@ describe("라운드 시작 초기화", () => {
   it("체력/상태/치유는 초기화(사망자도 부활), 누적 기절·사망 횟수는 유지", () => {
     const c = { ...applyDeath(downed()), revive: { target: "x", endsAt: 1 } };
     expect(resetForRound(c)).toMatchObject({ hp: MAX_HP, state: "NORMAL", deathAt: null, revive: null, downs: 1, deaths: 1 });
+  });
+});
+
+describe("직업별 수치", () => {
+  it("기사 체력 150, 궁수 체력 70", () => {
+    expect(newCombat(CLASSES.KNIGHT.maxHp).hp).toBe(150);
+    expect(newCombat(CLASSES.ARCHER.maxHp).hp).toBe(70);
+  });
+  it("궁수 쿨다운 1.4초", () => {
+    const c = { ...newCombat(CLASSES.ARCHER.maxHp), lastAttackAt: 1000 };
+    expect(checkAttack(c, "ATTACK", false, 2200, CLASSES.ARCHER.cooldownMs)).toBe("cooldown");
+    expect(checkAttack(c, "ATTACK", false, 2400, CLASSES.ARCHER.cooldownMs)).toBeNull();
+  });
+  it("궁수 치유 후 체력 = 70의 30%", () => {
+    const d = applyHit({ ...newCombat(70), hp: HIT_DAMAGE }, 1000);
+    expect(completeRevive(d, 2000, CLASSES.ARCHER.maxHp).hp).toBe(21);
+  });
+  it("직업 id 검사", () => {
+    expect(isClassId("ARCHER")).toBe(true);
+    expect(isClassId("WIZARD")).toBe(false);
   });
 });
