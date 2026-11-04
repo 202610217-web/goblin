@@ -38,7 +38,7 @@ export const CONFIG = {
   /** 내 기기로 연 방: 경기가 끝나고 이 시간이 지나면 방 서버를 끈다 (그 안에 다시 하기를 누르면 계속) */
   HOST_CLOSE_AFTER_MATCH_MS: 30_000,
   /** 기기 직접 연결: 이 시간 안에 연결되지 않으면 연결 중계(Cloudflare)로 바꾼다 (ms) */
-  P2P_CONNECT_TIMEOUT_MS: 8_000,
+  P2P_CONNECT_TIMEOUT_MS: 4_000,
   /** 자동 재접속 대기 시간 (지수 백오프, 마지막 값 반복) */
   RECONNECT_DELAYS_MS: [1000, 2000, 4000, 8000],
   /** 진동 패턴 (ms): 맞았을 때, 기절했을 때 */
