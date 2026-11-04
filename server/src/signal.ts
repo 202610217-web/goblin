@@ -8,8 +8,11 @@ import { PING_MESSAGE, PONG_MESSAGE } from "./constants";
 const MAX_SIGNAL_SOCKETS = 12;
 /** 연결 정보 메시지 최대 크기 (SDP는 보통 2~5KB) */
 const MAX_SIGNAL_BYTES = 16 * 1024;
-/** 연결별 초당 메시지 수 (ICE 후보가 한꺼번에 여러 개 올 수 있음) */
-const SIGNAL_RATE_PER_SEC = 40;
+/**
+ * 연결별 초당 메시지 수. 직접 연결이 막힌 네트워크(학교 와이파이 등)에서는 게임 메시지도 여기로 중계되므로,
+ * 손님 여럿에게 보내는 호스트는 더 많이 허용한다.
+ */
+const SIGNAL_RATE_PER_SEC = { host: 300, other: 60 } as const;
 
 interface SignalAttachment {
   id: string;
@@ -77,7 +80,7 @@ export class SignalRoom extends DurableObject<Env> {
     const now = Date.now();
     const r = this.rate.get(ws);
     if (!r || now - r.start >= 1000) this.rate.set(ws, { start: now, n: 1 });
-    else if (++r.n > SIGNAL_RATE_PER_SEC) return;
+    else if (++r.n > (this.att(ws).role === "host" ? SIGNAL_RATE_PER_SEC.host : SIGNAL_RATE_PER_SEC.other)) return;
 
     let m: SignalClientMessage;
     try { m = JSON.parse(raw); } catch { return; }

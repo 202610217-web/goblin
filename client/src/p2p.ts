@@ -15,7 +15,7 @@ const ICE_SERVERS: RTCIceServer[] = [
 type SignalIn =
   | { t: "hello"; id: string }
   | { t: "room"; host: string | null }
-  | { t: "from"; id: string; data: { sdp?: RTCSessionDescriptionInit; ice?: RTCIceCandidateInit } }
+  | { t: "from"; id: string; data: { sdp?: RTCSessionDescriptionInit; ice?: RTCIceCandidateInit; relay?: string } }
   | { t: "peer_left"; id: string }
   | { t: "error"; message: string };
 
@@ -35,6 +35,7 @@ class Signal {
     this.ws.onclose = () => { clearInterval(this.pingTimer); this.onclose(); };
   }
   send(o: unknown) { this.raw(JSON.stringify(o)); }
+  get isOpen() { return this.ws.readyState === WebSocket.OPEN; }
   private raw(s: string) { if (this.ws.readyState === WebSocket.OPEN) this.ws.send(s); }
   close() { clearInterval(this.pingTimer); try { this.ws.close(); } catch { /* 무시 */ } }
 }
@@ -68,6 +69,8 @@ async function routeLabel(pc: RTCPeerConnection): Promise<string> {
 const isFast = (text: string) =>
   text === "ping" || text === "pong" || text.startsWith('{"t":"move"') || text.startsWith('{"t":"jump"');
 const FAST_LABEL = "fast";
+/** 연결 중계로 게임 메시지를 주고받기 시작한다는 표시 */
+const RELAY_OPEN = "\u0000relay-open";
 
 /** DataChannel은 닫을 때 이유(코드)를 못 보내므로, 닫기 직전에 이 표시로 시작하는 메시지로 알린다 */
 const CLOSE_PREFIX = "\u0000close:";
@@ -105,6 +108,8 @@ function channelLink(ch: RTCDataChannel, pc: RTCPeerConnection, fast: () => RTCD
 export class P2PHost {
   private signal: Signal | null = null;
   private peers = new Map<string, RTCPeerConnection>();
+  /** 직접 연결이 막혀서 연결 중계로 게임 메시지를 주고받는 손님들 (중계 연결 id → 통로) */
+  private relays = new Map<string, PeerLink>();
   private stopped = false;
   private retry = 0;
   onerror: (message: string) => void = () => {};
@@ -115,6 +120,9 @@ export class P2PHost {
     if (this.stopped) return;
     const sig = new Signal(this.base, this.room);
     this.signal = sig;
+    // 중계 연결이 바뀌면 이전 중계 손님들은 끊긴 것 (그 손님들이 알아서 다시 접속한다)
+    for (const link of this.relays.values()) link.onclose(1006);
+    this.relays.clear();
     sig.onmsg = (m) => this.onSignal(m);
     sig.onclose = () => {
       if (this.stopped || this.signal !== sig) return;
@@ -127,15 +135,44 @@ export class P2PHost {
     if (this.stopped) return;
     this.stopped = true;
     clearTimeout(this.retry);
-    this.signal?.close();
-    this.hostRoom.stop(code); // 손님들에게 닫는다고 알린 다음
-    setTimeout(() => { for (const pc of this.peers.values()) try { pc.close(); } catch { /* 무시 */ } }, 500);
+    this.hostRoom.stop(code); // 손님들에게 닫는다고 먼저 알린 다음 (중계 손님에게는 연결 중계로 전달됨)
+    setTimeout(() => {
+      this.signal?.close();
+      for (const pc of this.peers.values()) try { pc.close(); } catch { /* 무시 */ }
+    }, 500);
+  }
+
+  /** 직접 연결이 막힌 손님: 연결 중계로 게임 메시지를 주고받는다 */
+  private onRelay(id: string, text: string) {
+    if (text === RELAY_OPEN) {
+      this.relays.get(id)?.onclose(1006);
+      const link: PeerLink = {
+        onmessage: () => {},
+        onclose: () => {},
+        send: (t) => this.signal?.send({ t: "to", id, data: { relay: t } }),
+        close: (code = 1000) => {
+          this.relays.delete(id);
+          this.signal?.send({ t: "to", id, data: { relay: CLOSE_PREFIX + code } });
+        },
+      };
+      this.relays.set(id, link);
+      this.hostRoom.addPeer(link, "RELAY");
+      return;
+    }
+    this.relays.get(id)?.onmessage(text);
   }
 
   private async onSignal(m: SignalIn) {
     if (m.t === "hello") { this.signal?.send({ t: "host" }); return; }
     if (m.t === "error") { this.onerror(m.message); return; }
+    if (m.t === "peer_left") {
+      const link = this.relays.get(m.id);
+      this.relays.delete(m.id);
+      link?.onclose(1006);
+      return;
+    }
     if (m.t !== "from") return;
+    if (typeof m.data?.relay === "string") { this.onRelay(m.id, m.data.relay); return; }
     const { sdp, ice } = m.data ?? {};
     if (sdp?.type === "offer") {
       // 새 손님: 연결을 받는다
@@ -181,6 +218,9 @@ export class P2PGuestTransport implements Transport {
   private done = false;
   private gotRoom = false;
   private timer = 0;
+  private hostId: string | null = null;
+  /** true면 직접 연결 대신 연결 중계로 주고받는 중 */
+  private relay = false;
   label = "기기 직접 연결";
   onopen = () => {};
   onmessage = (_t: string) => {};
@@ -190,17 +230,19 @@ export class P2PGuestTransport implements Transport {
     this.signal = new Signal(base, room);
     this.signal.onmsg = (m) => this.onSignal(m);
     this.signal.onclose = () => {
+      if (this.relay) { this.finish(1006); return; }
       if (this.ch && this.ch.readyState === "open") return;
       // 처음 입장 중에 중계에 못 붙으면 호스트 기기가 없는 것으로 보고 Cloudflare 방으로
       this.finish(!this.gotRoom && !this.requireHost ? 4404 : 1006);
     };
-    // 정해진 시간 안에 연결 안 되면 실패
-    this.timer = window.setTimeout(() => { if (!this.open) this.finish(4408); }, CONFIG.P2P_CONNECT_TIMEOUT_MS);
+    // 정해진 시간 안에 직접 연결이 안 되면 연결 중계로 (학교 와이파이처럼 기기끼리 연결을 막는 곳)
+    this.timer = window.setTimeout(() => { if (!this.open) this.useRelay(); }, CONFIG.P2P_CONNECT_TIMEOUT_MS);
   }
 
-  get open() { return this.ch?.readyState === "open"; }
+  get open() { return this.relay ? !this.done && this.signal.isOpen : this.ch?.readyState === "open"; }
   get connecting() { return !this.done && !this.open; }
   send(text: string) {
+    if (this.relay) { if (this.open) this.signal.send({ t: "to", id: this.hostId, data: { relay: text } }); return; }
     if (this.fast?.readyState === "open" && isFast(text)) this.fast.send(text);
     else if (this.open) this.ch!.send(text);
   }
@@ -215,8 +257,31 @@ export class P2PGuestTransport implements Transport {
     this.onclose(code);
   }
 
+  /** 직접 연결을 포기하고 연결 중계(Cloudflare)로 게임 메시지를 주고받는다 */
+  private useRelay() {
+    if (this.done || this.relay || this.open) return;
+    if (!this.hostId || !this.signal.isOpen) { this.finish(4408); return; }
+    this.relay = true;
+    clearTimeout(this.timer);
+    for (const c of [this.ch, this.fast]) if (c) { c.onclose = null; c.onmessage = null; }
+    if (this.pc) this.pc.onconnectionstatechange = null;
+    try { this.ch?.close(); this.fast?.close(); this.pc?.close(); } catch { /* 무시 */ }
+    this.ch = this.fast = this.pc = null;
+    this.label = "Cloudflare 중계 (직접 연결 막힘)";
+    this.signal.send({ t: "to", id: this.hostId, data: { relay: RELAY_OPEN } });
+    queueMicrotask(() => this.onopen());
+  }
+
   private async onSignal(m: SignalIn) {
     if (m.t === "hello") { this.signal.send({ t: "guest" }); return; }
+    if (m.t === "from" && this.relay) {
+      const text = m.data?.relay;
+      if (typeof text !== "string") return;
+      if (text.startsWith(CLOSE_PREFIX)) { this.finish(Number(text.slice(CLOSE_PREFIX.length)) || 1006); return; }
+      this.onmessage(text);
+      return;
+    }
+    if (m.t === "peer_left" && this.relay) { this.finish(1006); return; }
     if (m.t === "room") {
       this.gotRoom = true;
       if (!m.host) { this.finish(this.requireHost ? 4410 : 4404); return; }
@@ -233,6 +298,7 @@ export class P2PGuestTransport implements Transport {
   }
 
   private async connect(hostId: string) {
+    this.hostId = hostId;
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     this.pc = pc;
     const ch = pc.createDataChannel("game", { ordered: true });
@@ -255,7 +321,7 @@ export class P2PGuestTransport implements Transport {
       this.onmessage(e.data);
     };
     ch.onclose = () => this.finish(1006);
-    pc.onconnectionstatechange = () => { if (pc.connectionState === "failed") this.finish(4408); };
+    pc.onconnectionstatechange = () => { if (pc.connectionState === "failed") this.useRelay(); };
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     this.signal.send({ t: "to", id: hostId, data: { sdp: pc.localDescription?.toJSON() } });
