@@ -16,10 +16,23 @@ import {
   RECONNECT_GRACE_MS,
   SESSION_TOKEN_BYTES,
   SPAWNS,
+  FIRST_ATTACKING_TEAM,
 } from "./constants";
 import { type Body, groundHeightAt, makeBody, roundBody, simulate, withAngle, withJump } from "../../shared/sim";
 import { PHYS, isNearHouse } from "../../shared/world";
 import { AIM, findAimTarget, inReach } from "../../shared/aim";
+import {
+  type RoundEndReason,
+  type RoundRecord,
+  type Score,
+  type Turn,
+  addPoint,
+  isDeuce,
+  matchPointTeams,
+  matchWinner,
+  nextTurn,
+  roundWinner,
+} from "./score";
 import {
   type Combat,
   applyDeath,
@@ -95,8 +108,13 @@ interface RoomState extends PhaseState {
   code: string;
   /** 집 작업(부수기/수리) 상태 */
   work: WorkState;
-  /** 이번 라운드가 전멸로 끝났으면 이긴 팀 (승점은 5단계) */
-  roundEnd: { winner: Team; reason: "wipe" } | null;
+  /** ROUND_END 동안: 방금 라운드의 승자와 이유 */
+  roundEnd: { winner: Team; reason: RoundEndReason } | null;
+  score: Score;
+  history: RoundRecord[];
+  turn: Turn;
+  matchWinner: Team | null;
+  matchEndReason: "score" | "player_left" | null;
   players: PlayerRecord[];
   deadlines: Deadline[];
 }
@@ -165,8 +183,20 @@ function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/** 경기 기록 초기값 */
+function freshMatch() {
+  return {
+    roundEnd: null,
+    score: { A: 0, B: 0 },
+    history: [] as RoundRecord[],
+    turn: { attackingTeam: FIRST_ATTACKING_TEAM, roundsInTurn: 0 } as Turn,
+    matchWinner: null,
+    matchEndReason: null,
+  };
+}
+
 function emptyState(code: string): RoomState {
-  return { code, ...initialPhase(), work: workForPhase("LOBBY", 0), roundEnd: null, players: [], deadlines: [] };
+  return { code, ...initialPhase(), work: workForPhase("LOBBY", 0), ...freshMatch(), players: [], deadlines: [] };
 }
 
 /** 1초 창 안에서 limit 개까지 허용 */
@@ -431,6 +461,20 @@ export class GameRoom extends DurableObject<Env> {
         this.broadcastRoomState(now);
         return;
 
+      case "debug_score":
+        if (this.env.DEBUG_COMMANDS !== "true") return this.sendError(ws, "debug_disabled", "디버그 명령이 꺼져 있어요");
+        st.score = { A: msg.A, B: msg.B };
+        await this.save();
+        this.broadcastRoomState(now);
+        return;
+
+      case "rematch":
+        if (st.phase !== "MATCH_END") return this.sendError(ws, "wrong_phase", "경기가 끝난 뒤에만 다시 할 수 있어요");
+        this.applyPhase(initialPhase(), now); // 로비로: 모두 다시 준비하면 새 경기
+        await this.saveAndSchedule();
+        this.broadcastRoomState(now);
+        return;
+
       case "debug_teleport": {
         if (this.env.DEBUG_COMMANDS !== "true") return this.sendError(ws, "debug_disabled", "디버그 명령이 꺼져 있어요");
         const x = Math.min(PHYS.MAP_X - PHYS.PLAYER_HALF, Math.max(PHYS.PLAYER_HALF, msg.x));
@@ -519,12 +563,18 @@ export class GameRoom extends DurableObject<Env> {
       st.deadlines = rest;
       for (const d of due) {
         if (d.kind === "phase") {
-          // 단계 제한 시간 종료 → 다음 단계 (원래 마감 시각 기준으로 계산)
-          if (st.phaseEndsAt !== null && st.phaseEndsAt <= now) this.applyPhase(nextOnTimeout(st, d.at), d.at);
+          // 단계 제한 시간 종료 (원래 마감 시각 기준으로 계산)
+          if (st.phaseEndsAt === null || st.phaseEndsAt > now) continue;
+          if (st.phase === "ATTACK") this.endRound("break_timeout", d.at); // 2분 안에 못 부숨
+          else if (st.phase === "REPAIR") this.endRound("repair_fail", d.at); // 1분 안에 못 고침
+          else if (st.phase === "ROUND_END") this.advanceAfterRound(d.at);
+          else this.applyPhase(nextOnTimeout(st, d.at), d.at); // COUNTDOWN → ATTACK
         } else if (d.kind === "work") {
           // 집 작업 100% → 부수기 완료는 REPAIR, 수리 완료는 ROUND_END (판정 시각은 완료 예정 시각)
           const kind = st.work.kind;
-          if (kind && isComplete(st.work, d.at)) {
+          if (kind === "REPAIR" && isComplete(st.work, d.at)) {
+            this.endRound("repair_success", d.at);
+          } else if (kind === "BREAK" && isComplete(st.work, d.at)) {
             this.applyPhase(nextOnWorkComplete(st, kind, d.at), d.at);
             this.checkWipe(d.at); // REPAIR 시작 순간 수비팀이 이미 전멸이면 바로 종료
           }
@@ -620,10 +670,34 @@ export class GameRoom extends DurableObject<Env> {
   private checkWipe(now: number) {
     const st = this.state!;
     const teams = { A: st.players.filter((p) => p.team === "A").map((p) => p.c), B: st.players.filter((p) => p.team === "B").map((p) => p.c) };
-    const winner = wipeWinner(st.phase, st.attackingTeam, teams);
-    if (!winner) return;
-    this.applyPhase(enterPhase(st, "ROUND_END", now), now);
-    st.roundEnd = { winner, reason: "wipe" };
+    if (!wipeWinner(st.phase, st.attackingTeam, teams)) return;
+    this.endRound(st.phase === "ATTACK" ? "attackers_wiped" : "defenders_wiped", now);
+  }
+
+  // ---------- 점수 ----------
+  /** 라운드 종료: 승점 반영, 기록 추가, ROUND_END(5초) */
+  private endRound(reason: RoundEndReason, at: number) {
+    const st = this.state!;
+    if (st.phase !== "ATTACK" && st.phase !== "REPAIR") return;
+    const winner = roundWinner(reason, st.attackingTeam);
+    st.score = addPoint(st.score, winner);
+    st.history = [...st.history, { round: st.round, winner, reason, attackingTeam: st.attackingTeam }];
+    this.applyPhase(enterPhase(st, "ROUND_END", at), at);
+    st.roundEnd = { winner, reason };
+  }
+
+  /** ROUND_END가 끝나면: 승리 조건이면 MATCH_END, 아니면 다음 라운드 (공수 교대 반영) */
+  private advanceAfterRound(at: number) {
+    const st = this.state!;
+    const winner = matchWinner(st.score);
+    if (winner) {
+      st.matchWinner = winner;
+      st.matchEndReason = "score";
+      this.applyPhase(enterPhase(st, "MATCH_END", at), at);
+      return;
+    }
+    st.turn = nextTurn(st.turn, st.score);
+    this.applyPhase(enterPhase({ ...st, round: st.round + 1, attackingTeam: st.turn.attackingTeam }, "COUNTDOWN", at), at);
   }
 
   /** 작업 완료 예정 시각을 마감 시각 목록에 넣는다 (아무도 안 누르면 제거) */
@@ -650,6 +724,7 @@ export class GameRoom extends DurableObject<Env> {
     const st = this.state;
     if (!st || st.phase !== "LOBBY" || !canStartMatch(st.players)) return;
     for (const p of st.players) p.c = newCombat(); // 경기 시작: 누적 기절/사망 횟수도 0
+    Object.assign(st, freshMatch());
     this.applyPhase(startMatch(now), now);
   }
 
@@ -672,7 +747,10 @@ export class GameRoom extends DurableObject<Env> {
       for (const p of st.players) p.c = stopRevive(p.c);
       st.deadlines = st.deadlines.filter((d) => d.kind !== "revive" && d.kind !== "death");
     }
-    if (st.phase === "LOBBY") for (const p of st.players) { p.ready = false; p.c = newCombat(); }
+    if (st.phase === "LOBBY") {
+      for (const p of st.players) { p.ready = false; p.c = newCombat(); }
+      Object.assign(st, freshMatch());
+    }
     if (enteredNewRound) {
       st.roundEnd = null;
       // 라운드 시작: 체력/상태 초기화(사망자도 부활), 팀별 시작 위치로
@@ -731,9 +809,12 @@ export class GameRoom extends DurableObject<Env> {
     }
     st.players = st.players.filter((p) => !ids.includes(p.id));
     for (const id of ids) st.deadlines = removeDeadline(st.deadlines, "reconnect", id);
-    if (st.phase !== "LOBBY" && ids.length > 0) {
-      this.applyPhase(initialPhase(), now);
-      this.broadcast({ t: "notice", code: "player_left_game", message: "플레이어가 나가서 로비로 돌아갑니다" });
+    if (st.phase !== "LOBBY" && st.phase !== "MATCH_END" && ids.length > 0) {
+      // 이탈 처리(단순 규칙): 경기를 끝내고 결과 화면으로. "다시 하기"를 누르면 로비로 돌아간다
+      st.matchWinner = null;
+      st.matchEndReason = "player_left";
+      this.applyPhase(enterPhase(st, "MATCH_END", now), now);
+      this.broadcast({ t: "notice", code: "player_left_game", message: "플레이어가 나가서 경기가 끝났어요" });
     }
     await this.saveAndSchedule();
     this.broadcastRoomState(now);
@@ -801,6 +882,12 @@ export class GameRoom extends DurableObject<Env> {
       phaseEndsAt: st.phaseEndsAt,
       work: this.workInfo(),
       roundEnd: st.roundEnd,
+      score: st.score,
+      history: st.history,
+      matchPoint: st.phase === "MATCH_END" ? [] : matchPointTeams(st.score),
+      deuce: isDeuce(st.score),
+      matchWinner: st.matchWinner,
+      matchEndReason: st.matchEndReason,
       players: this.publicPlayers(),
       serverTime: now,
     });

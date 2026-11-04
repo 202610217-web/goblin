@@ -83,3 +83,13 @@ export const REVIVE_HP_RATIO = 0.3;
 export const REVIVE_INVULN_MS = 1_500;
 /** 타격 사거리, 치유 거리, 높이 차이, 카메라(조준) 수치는 화면과 같아야 해서 shared/aim.ts에 있다 */
 export { AIM } from "../../shared/aim";
+
+// ---------- 5단계: 점수 규칙 ----------
+/** 한 팀이 연속으로 공격하는 라운드 수 (이후 공수 교대) */
+export const ROUNDS_PER_TURN = 3;
+/** 먼저 이 점수에 도달하면 승리 */
+export const WIN_SCORE = 6;
+/** 듀스(WIN_SCORE-1 동점 이후)에서는 이 점수 차가 나야 승리 */
+export const DEUCE_LEAD = 2;
+/** true면 듀스 동안 매 라운드 공수 교대 */
+export const DEUCE_SWAP_EVERY_ROUND = true;

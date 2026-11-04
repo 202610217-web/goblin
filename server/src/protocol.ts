@@ -5,6 +5,8 @@ export type { Body };
 import type { WorkState } from "./work";
 export type { WorkState };
 import type { Combat } from "./combat";
+import type { RoundEndReason, RoundRecord, Score } from "./score";
+export type { RoundEndReason, RoundRecord, Score };
 
 export type Team = "A" | "B";
 export type Phase = "LOBBY" | "COUNTDOWN" | "ATTACK" | "REPAIR" | "ROUND_END" | "MATCH_END";
@@ -30,8 +32,11 @@ export type ClientMessage =
   /** 치유 버튼 누름 / 뗌 (대상은 서버가 근처의 기절한 팀원 중 가장 가까운 사람으로 고른다) */
   | { t: "revive_start" }
   | { t: "revive_stop" }
+  /** 경기 종료 화면에서 "다시 하기" → 로비로 돌아가 다시 준비 */
+  | { t: "rematch" }
   | { t: "debug_phase"; phase: Phase } // 개발용 강제 단계 전환 (DEBUG_COMMANDS=true 일 때만)
   | { t: "debug_teleport"; x: number; y: number } // 개발용 순간이동 (DEBUG_COMMANDS=true 일 때만)
+  | { t: "debug_score"; A: number; B: number } // 개발용 점수 설정 (DEBUG_COMMANDS=true 일 때만)
   | { t: "leave" }; // 완전히 나가기 (재접속 대기 없이 즉시 퇴장)
 
 // ---------- 서버 → 클라이언트 ----------
@@ -65,8 +70,18 @@ export interface RoomStateMessage {
   /** 현재 단계 종료 시각 (서버 기준 ms). 제한 없으면 null */
   phaseEndsAt: number | null;
   work: WorkInfo;
-  /** 이번 라운드가 전멸로 끝났으면 이긴 팀 (승점은 5단계) */
-  roundEnd: { winner: Team; reason: "wipe" } | null;
+  /** ROUND_END 동안: 방금 라운드의 승자와 이유 */
+  roundEnd: { winner: Team; reason: RoundEndReason } | null;
+  /** 팀 점수, 라운드별 기록 */
+  score: Score;
+  history: RoundRecord[];
+  /** 다음 라운드를 이기면 경기에서 이기는 팀 (매치포인트) */
+  matchPoint: Team[];
+  /** 듀스 중인지 (5:5 이후, 2점 차가 나야 승리) */
+  deuce: boolean;
+  /** MATCH_END: 이긴 팀 (플레이어 이탈로 끝나면 null), 끝난 이유 */
+  matchWinner: Team | null;
+  matchEndReason: "score" | "player_left" | null;
   players: PublicPlayer[];
   serverTime: number;
 }
@@ -152,9 +167,16 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return { t: "revive_start" };
     case "revive_stop":
       return { t: "revive_stop" };
+    case "rematch":
+      return { t: "rematch" };
     case "debug_teleport":
       if (typeof m.x !== "number" || typeof m.y !== "number" || !Number.isFinite(m.x) || !Number.isFinite(m.y)) return null;
       return { t: "debug_teleport", x: m.x, y: m.y };
+    case "debug_score": {
+      const ok = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 99;
+      if (!ok(m.A) || !ok(m.B)) return null;
+      return { t: "debug_score", A: m.A as number, B: m.B as number };
+    }
     case "debug_phase":
       if (!PHASES.includes(m.phase as Phase)) return null;
       return { t: "debug_phase", phase: m.phase as Phase };
