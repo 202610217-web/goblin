@@ -37,6 +37,7 @@ export type ClientMessage =
   | { t: "debug_phase"; phase: Phase } // 개발용 강제 단계 전환 (DEBUG_COMMANDS=true 일 때만)
   | { t: "debug_teleport"; x: number; y: number } // 개발용 순간이동 (DEBUG_COMMANDS=true 일 때만)
   | { t: "debug_score"; A: number; B: number } // 개발용 점수 설정 (DEBUG_COMMANDS=true 일 때만)
+  | { t: "debug_stats" } // 개발용: 무료 한도 점검용 사용량 카운터 요청 (DEBUG_COMMANDS=true 일 때만)
   | { t: "leave" }; // 완전히 나가기 (재접속 대기 없이 즉시 퇴장)
 
 // ---------- 서버 → 클라이언트 ----------
@@ -97,6 +98,21 @@ export interface WorkInfo extends WorkState {
   checkpoint: number;
 }
 
+/** 무료 한도 점검용 카운터 */
+export interface UsageStats {
+  since: number;
+  /** 들어온 WebSocket 메시지 (20개 = 요청 1개) — 종류별 */
+  messagesIn: Record<string, number>;
+  /** storage.put 횟수 (= 쓴 행 수), setAlarm 횟수 (= 쓴 행 수), deleteAlarm 횟수 */
+  puts: number;
+  alarmSets: number;
+  alarmDeletes: number;
+  /** 알람 실행 횟수 (= 요청 수) */
+  alarmRuns: number;
+  /** 새 WebSocket 접속 (= Worker 요청 1 + DO 요청 1) */
+  connects: number;
+}
+
 export type ErrorCode =
   | "bad_message"
   | "not_joined"
@@ -118,6 +134,8 @@ export type ServerMessage =
   /** 한 플레이어의 이동 입력이 처리되었을 때 (body.t 시각의 물리 상태, s = 처리한 입력 순번) */
   | { t: "move"; id: string; body: Body; s: number }
   | { t: "notice"; code: "player_left_game"; message: string }
+  /** 개발용 사용량 카운터 (이 DO가 깨어난 뒤부터) */
+  | { t: "debug_stats"; stats: UsageStats }
   /** 누군가 타격했을 때 (target = 맞은 사람, 빗나가면 null). 체력 변화는 함께 오는 room_state로 반영 */
   | { t: "swing"; by: string; target: string | null; serverTime: number }
   /** 집 작업 상태가 바뀌었을 때 (시작/중단/완료)만 보낸다 */
@@ -177,6 +195,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       if (!ok(m.A) || !ok(m.B)) return null;
       return { t: "debug_score", A: m.A as number, B: m.B as number };
     }
+    case "debug_stats":
+      return { t: "debug_stats" };
     case "debug_phase":
       if (!PHASES.includes(m.phase as Phase)) return null;
       return { t: "debug_phase", phase: m.phase as Phase };

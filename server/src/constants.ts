@@ -51,8 +51,12 @@ export { PHYS, HOUSES, SPAWNS, BOXES } from "../../shared/world";
 export const MOVE_RATE_LIMIT_PER_SEC = 5;
 /** 연결별 점프 메시지(jump) 레이트 리밋 (초당). 땅에 있을 때만 점프되므로 실제로는 더 적다 */
 export const JUMP_RATE_LIMIT_PER_SEC = 3;
-/** 이동 상태를 storage에 저장하는 최소 간격 (쓰기 횟수 절약) */
-export const MOVE_PERSIST_INTERVAL_MS = 1_000;
+/**
+ * 자주 바뀌는 상태(이동, 체력, 작업/치유 시작·중단)를 storage에 모아서 저장하는 간격.
+ * 무료 플랜은 "쓴 행 수"가 하루 10만 개로 가장 빠듯해서, 바뀔 때마다가 아니라 이 간격마다 1번만 쓴다.
+ * (단계 전환/입장/퇴장은 바로 저장. Durable Object는 약 10초 이상 조용해야 잠들기 때문에 그 전에 저장된다)
+ */
+export const STATE_FLUSH_MS = 5_000;
 
 // ---------- 3단계: 집 작업 (꾹 누르기) ----------
 /** 부수기 작업 시간 (혼자 0% → 100%) */

@@ -6,7 +6,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   MAX_MESSAGE_BYTES,
   MAX_SOCKETS_PER_ROOM,
-  MOVE_PERSIST_INTERVAL_MS,
+  STATE_FLUSH_MS,
   JUMP_RATE_LIMIT_PER_SEC,
   MOVE_RATE_LIMIT_PER_SEC,
   ATTACK_COOLDOWN_MS,
@@ -81,6 +81,7 @@ import {
   type ServerMessage,
   type Team,
   type WorkInfo,
+  type UsageStats,
   parseClientMessage,
 } from "./protocol";
 
@@ -217,7 +218,14 @@ export class GameRoom extends DurableObject<Env> {
   private moveRate = new Map<WebSocket, RateWindow>();
   private jumpRate = new Map<WebSocket, RateWindow>();
   /** 이동 상태가 아직 storage에 저장되지 않았는지 */
-  private movesDirty = false;
+  /** 저장 안 된 변경이 있는지, 바로 저장해야 하는지, 모아서 저장할 예정 시각 */
+  private dirty = false;
+  private mustSave = false;
+  private flushAt: number | null = null;
+  /** 지금 걸려 있는 알람 시각 (같은 값이면 setAlarm을 다시 부르지 않는다. undefined = 모름) */
+  private alarmAt: number | null | undefined = undefined;
+  /** 무료 한도 점검용 사용량 카운터 (메모리 전용) */
+  private stats: UsageStats = { since: Date.now(), messagesIn: {}, puts: 0, alarmSets: 0, alarmDeletes: 0, alarmRuns: 0, connects: 0 };
   private lastSaveAt = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -227,6 +235,7 @@ export class GameRoom extends DurableObject<Env> {
     // 깨어날 때 저장된 상태를 먼저 불러온다
     ctx.blockConcurrencyWhile(async () => {
       this.state = (await ctx.storage.get<RoomState>(STATE_KEY)) ?? null;
+      this.alarmAt = await ctx.storage.getAlarm();
     });
   }
 
@@ -243,6 +252,7 @@ export class GameRoom extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server); // ws.accept()는 쓰지 않는다 (Hibernation)
+    this.stats.connects++;
     server.serializeAttachment({ playerId: null } satisfies SocketAttachment);
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -257,6 +267,7 @@ export class GameRoom extends DurableObject<Env> {
       return this.sendError(ws, "rate_limited", "메시지가 너무 많아요");
     }
     const msg = parseClientMessage(raw);
+    this.stats.messagesIn[msg?.t ?? "invalid"] = (this.stats.messagesIn[msg?.t ?? "invalid"] ?? 0) + 1;
     if (!msg) return this.sendError(ws, "bad_message", "잘못된 메시지");
 
     const st = await this.load();
@@ -268,11 +279,12 @@ export class GameRoom extends DurableObject<Env> {
 
     if (msg.t === "join") {
       if (player) return this.sendError(ws, "already_joined", "이미 입장했어요");
-      return this.handleJoin(ws, st, msg, now);
+      await this.handleJoin(ws, st, msg, now);
+      return this.persist();
     }
     if (!player) return this.sendError(ws, "not_joined", "먼저 입장해야 해요");
     await this.handlePlayerMessage(ws, st, player, msg, now);
-    await this.flushMovesIfDue(now);
+    await this.persist();
   }
 
   private async handleJoin(ws: WebSocket, st: RoomState, msg: Extract<ClientMessage, { t: "join" }>, now: number) {
@@ -292,7 +304,7 @@ export class GameRoom extends DurableObject<Env> {
         ws.serializeAttachment({ playerId: existing.id } satisfies SocketAttachment);
         this.send(ws, this.welcome(existing, true, now));
         this.tryStartMatch(now);
-        await this.saveAndSchedule();
+        await this.commit();
         this.broadcastRoomState(now);
         return;
       }
@@ -348,7 +360,7 @@ export class GameRoom extends DurableObject<Env> {
         if (st.phase !== "LOBBY") return this.sendError(ws, "wrong_phase", "로비에서만 준비할 수 있어요");
         player.ready = msg.ready;
         this.tryStartMatch(now);
-        await this.saveAndSchedule();
+        await this.commit();
         this.broadcastRoomState(now);
         return;
 
@@ -373,7 +385,7 @@ export class GameRoom extends DurableObject<Env> {
           const jumped = withJump(player.body, now); // 공중에 있으면 null (무시)
           if (jumped) player.body = roundBody(jumped);
         }
-        this.movesDirty = true;
+        this.markDirty();
         // 바뀐 게 없어도 응답(순번 확인)은 보낸다. 서버→클라이언트 메시지는 요청 수에 포함되지 않는다
         this.broadcastMove(player);
         return;
@@ -396,7 +408,7 @@ export class GameRoom extends DurableObject<Env> {
         player.body = stopped(player.body, now); // 작업 중에는 제자리 고정
         st.work = startHold(st.work, player.id, now);
         this.scheduleWork();
-        await this.saveAndSchedule();
+        await this.commit();
         this.broadcastMove(player);
         this.broadcastWork(now);
         return;
@@ -404,7 +416,7 @@ export class GameRoom extends DurableObject<Env> {
 
       case "hold_stop":
         if (!this.releaseHold(player, now)) return; // 누르고 있지 않았으면 무시
-        await this.saveAndSchedule();
+        await this.commit();
         this.broadcastMove(player);
         this.broadcastWork(now);
         return;
@@ -427,7 +439,7 @@ export class GameRoom extends DurableObject<Env> {
         }
         this.broadcast({ t: "swing", by: player.id, target: hit?.id ?? null, serverTime: now });
         this.checkWipe(now);
-        await this.saveAndSchedule();
+        await this.commit();
         this.broadcastRoomState(now);
         if (hit) this.broadcastWork(now); // 기절로 작업이 멈췄을 수 있음
         return;
@@ -450,14 +462,14 @@ export class GameRoom extends DurableObject<Env> {
         player.c = startRevive(player.c, target.id, now);
         st.deadlines = upsertDeadline(st.deadlines, { kind: "revive", key: player.id, at: player.c.revive!.endsAt });
         this.refreshMotion(player, now); // 치유 중에는 제자리 고정
-        await this.saveAndSchedule();
+        await this.commit();
         this.broadcastRoomState(now);
         return;
       }
 
       case "revive_stop":
         if (!this.cancelRevive(player, now)) return;
-        await this.saveAndSchedule();
+        await this.commit();
         this.broadcastRoomState(now);
         return;
 
@@ -468,10 +480,15 @@ export class GameRoom extends DurableObject<Env> {
         this.broadcastRoomState(now);
         return;
 
+      case "debug_stats":
+        if (this.env.DEBUG_COMMANDS !== "true") return this.sendError(ws, "debug_disabled", "디버그 명령이 꺼져 있어요");
+        this.send(ws, { t: "debug_stats", stats: this.stats });
+        return;
+
       case "rematch":
         if (st.phase !== "MATCH_END") return this.sendError(ws, "wrong_phase", "경기가 끝난 뒤에만 다시 할 수 있어요");
         this.applyPhase(initialPhase(), now); // 로비로: 모두 다시 준비하면 새 경기
-        await this.saveAndSchedule();
+        await this.commit();
         this.broadcastRoomState(now);
         return;
 
@@ -481,7 +498,7 @@ export class GameRoom extends DurableObject<Env> {
         const y = Math.min(PHYS.MAP_Y - PHYS.PLAYER_HALF, Math.max(PHYS.PLAYER_HALF, msg.y));
         this.releaseHold(player, now);
         player.body = { ...makeBody(x, y, now), z: groundHeightAt(x, y, 100) };
-        this.movesDirty = true;
+        this.markDirty();
         this.broadcastMove(player);
         this.broadcastWork(now);
         return;
@@ -490,7 +507,7 @@ export class GameRoom extends DurableObject<Env> {
       case "debug_phase":
         if (this.env.DEBUG_COMMANDS !== "true") return this.sendError(ws, "debug_disabled", "디버그 명령이 꺼져 있어요");
         this.applyPhase(forcePhase(st, msg.phase, now), now);
-        await this.saveAndSchedule();
+        await this.commit();
         this.broadcastRoomState(now);
         return;
 
@@ -527,13 +544,14 @@ export class GameRoom extends DurableObject<Env> {
     const player = att?.playerId ? st.players.find((p) => p.id === att.playerId) : undefined;
     if (player && player.conn === "CONNECTED" && this.socketsOf(player.id, ws).length === 0) {
       player.conn = "RECONNECTING";
+      this.mustSave = true;
       player.reconnectDeadline = now + RECONNECT_GRACE_MS;
       player.wantA = -1;
       this.releaseHold(player, now); // 작업 중이었다면 중단
       this.cancelRevive(player, now); // 치유 중이었다면 중단
       player.body = stopped(player.body, now); // 재접속 대기 중에는 정지
       st.deadlines = upsertDeadline(st.deadlines, { kind: "reconnect", key: player.id, at: player.reconnectDeadline });
-      await this.saveAndSchedule();
+      await this.commit();
       this.broadcastRoomState(now);
       this.broadcastWork(now);
     }
@@ -542,10 +560,13 @@ export class GameRoom extends DurableObject<Env> {
 
   // ---------- 알람 (마감 시각 처리) ----------
   async alarm(): Promise<void> {
+    this.stats.alarmRuns++;
+    this.alarmAt = null; // 알람은 울리면 사라진다
     await this.load();
     const now = Date.now();
     await this.processDue(now);
-    await this.saveAndSchedule(); // 혹시 일찍 깨어났어도 다음 알람을 다시 건다
+    if (this.dirty && this.flushAt !== null && this.flushAt <= now) this.mustSave = true; // 모아 둔 변경 저장 시각
+    await this.persist(); // 다음 알람을 다시 건다 (일찍 깨어났어도)
     await this.cleanupIfEmpty();
   }
 
@@ -598,7 +619,7 @@ export class GameRoom extends DurableObject<Env> {
     if (expired.length > 0) {
       await this.removePlayers(expired, now); // 저장/브로드캐스트 포함
     } else {
-      await this.saveAndSchedule();
+      await this.commit();
       this.broadcastRoomState(now);
     }
   }
@@ -629,7 +650,7 @@ export class GameRoom extends DurableObject<Env> {
     const a = this.canMoveNow(p) ? p.wantA : -1;
     if (a !== p.body.a) {
       p.body = roundBody(withAngle(p.body, a, now));
-      this.movesDirty = true;
+      this.markDirty();
     }
   }
 
@@ -768,7 +789,8 @@ export class GameRoom extends DurableObject<Env> {
     st.deadlines = st.phaseEndsAt === null
       ? removeDeadline(st.deadlines, "phase", "phase")
       : upsertDeadline(st.deadlines, { kind: "phase", key: "phase", at: st.phaseEndsAt });
-    this.movesDirty = true;
+    this.markDirty();
+    this.mustSave = true; // 단계 전환은 드물고 중요하므로 바로 저장
   }
 
   // ---------- 도우미 ----------
@@ -780,24 +802,35 @@ export class GameRoom extends DurableObject<Env> {
   private async save() {
     if (!this.state) return;
     await this.ctx.storage.put(STATE_KEY, this.state);
-    this.movesDirty = false;
+    this.stats.puts++;
+    this.dirty = false;
+    this.mustSave = false;
+    this.flushAt = null;
     this.lastSaveAt = Date.now();
   }
 
-  /**
-   * 이동 상태는 자주 바뀌므로 매번 저장하지 않고 최소 간격마다 저장한다 (쓰기 횟수 절약).
-   * 저장 전에 DO가 잠들면 마지막 1초 이내의 방향 변경만 잃는다.
-   */
-  private async flushMovesIfDue(now: number) {
-    if (this.movesDirty && now - this.lastSaveAt >= MOVE_PERSIST_INTERVAL_MS) await this.save();
+  /** 저장 안 된 변경이 생겼다고 표시. STATE_FLUSH_MS 안에 저장되도록 예정 시각을 잡는다 */
+  private markDirty() {
+    this.dirty = true;
+    if (this.flushAt === null) this.flushAt = Date.now() + STATE_FLUSH_MS;
   }
 
-  /** 저장 후, 마감 시각 목록 중 가장 가까운 것으로 알람을 다시 건다 */
-  private async saveAndSchedule() {
-    await this.save();
-    const next = this.state ? nextDeadlineAt(this.state.deadlines) : null;
-    if (next === null) await this.ctx.storage.deleteAlarm();
-    else await this.ctx.storage.setAlarm(next);
+  /** 상태가 바뀐 뒤 부른다: 변경 표시 + (필요하면) 저장 + 알람 맞추기 */
+  private async commit() {
+    this.markDirty();
+    await this.persist();
+  }
+
+  /** 바로 저장해야 하면 저장하고, 마감 시각 목록과 모아서 저장할 시각 중 가장 빠른 시각으로 알람을 맞춘다 */
+  private async persist() {
+    if (!this.state) return;
+    if (this.mustSave) await this.save();
+    let next = nextDeadlineAt(this.state.deadlines);
+    if (this.dirty && this.flushAt !== null && (next === null || this.flushAt < next)) next = this.flushAt;
+    if (next === this.alarmAt) return; // 이미 그 시각으로 걸려 있으면 쓰지 않는다 (setAlarm도 쓴 행 1개)
+    if (next === null) { await this.ctx.storage.deleteAlarm(); this.stats.alarmDeletes++; }
+    else { await this.ctx.storage.setAlarm(next); this.stats.alarmSets++; }
+    this.alarmAt = next;
   }
 
   /** 플레이어 제거. 게임 중에 인원이 빠지면 (임시 규칙) 로비로 돌아간다 */
@@ -808,6 +841,7 @@ export class GameRoom extends DurableObject<Env> {
       else if (p.c.revive && ids.includes(p.c.revive.target)) this.cancelRevive(p, now);
     }
     st.players = st.players.filter((p) => !ids.includes(p.id));
+    this.mustSave = true;
     for (const id of ids) st.deadlines = removeDeadline(st.deadlines, "reconnect", id);
     if (st.phase !== "LOBBY" && st.phase !== "MATCH_END" && ids.length > 0) {
       // 이탈 처리(단순 규칙): 경기를 끝내고 결과 화면으로. "다시 하기"를 누르면 로비로 돌아간다
@@ -816,7 +850,7 @@ export class GameRoom extends DurableObject<Env> {
       this.applyPhase(enterPhase(st, "MATCH_END", now), now);
       this.broadcast({ t: "notice", code: "player_left_game", message: "플레이어가 나가서 경기가 끝났어요" });
     }
-    await this.saveAndSchedule();
+    await this.commit();
     this.broadcastRoomState(now);
     await this.cleanupIfEmpty();
   }
@@ -828,7 +862,10 @@ export class GameRoom extends DurableObject<Env> {
     const open = this.ctx.getWebSockets().filter((w) => w.readyState === WebSocket.OPEN);
     if (open.length > 0) return;
     this.state = null;
-    this.movesDirty = false;
+    this.dirty = false;
+    this.mustSave = false;
+    this.flushAt = null;
+    this.alarmAt = null;
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
   }
