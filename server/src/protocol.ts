@@ -2,6 +2,8 @@
 // 모든 메시지는 { t: "종류", ... } 모양이다.
 import { type Body, isValidAngle } from "../../shared/sim";
 export type { Body };
+import type { WorkState } from "./work";
+export type { WorkState };
 
 export type Team = "A" | "B";
 export type Phase = "LOBBY" | "COUNTDOWN" | "ATTACK" | "REPAIR" | "ROUND_END" | "MATCH_END";
@@ -19,7 +21,11 @@ export type ClientMessage =
   | { t: "move"; a: number; s: number }
   /** 점프 (땅에 있을 때만 서버가 허용) */
   | { t: "jump"; s: number }
+  /** 집 작업 버튼 누름 / 뗌 (매 프레임 보내지 않고 이 2개만 보낸다) */
+  | { t: "hold_start" }
+  | { t: "hold_stop" }
   | { t: "debug_phase"; phase: Phase } // 개발용 강제 단계 전환 (DEBUG_COMMANDS=true 일 때만)
+  | { t: "debug_teleport"; x: number; y: number } // 개발용 순간이동 (DEBUG_COMMANDS=true 일 때만)
   | { t: "leave" }; // 완전히 나가기 (재접속 대기 없이 즉시 퇴장)
 
 // ---------- 서버 → 클라이언트 ----------
@@ -45,8 +51,20 @@ export interface RoomStateMessage {
   attackingTeam: Team;
   /** 현재 단계 종료 시각 (서버 기준 ms). 제한 없으면 null */
   phaseEndsAt: number | null;
+  work: WorkInfo;
   players: PublicPlayer[];
   serverTime: number;
+}
+
+/**
+ * 집 작업 상태. 클라이언트는 현재 진행률 = progress + (지금 - since) × rate 로 부드럽게 그린다.
+ * (rate는 1ms당 진행률, completesAt은 지금 속도로 100%가 되는 서버 시각)
+ */
+export interface WorkInfo extends WorkState {
+  rate: number;
+  completesAt: number | null;
+  /** 체크포인트 비율 (진행률 바에 표시) */
+  checkpoint: number;
 }
 
 export type ErrorCode =
@@ -59,7 +77,8 @@ export type ErrorCode =
   | "rate_limited"
   | "replaced"
   | "wrong_phase"
-  | "debug_disabled";
+  | "debug_disabled"
+  | "cannot_work";
 
 export type ServerMessage =
   | { t: "welcome"; playerId: string; token: string; room: string; resumed: boolean; serverTime: number }
@@ -67,6 +86,8 @@ export type ServerMessage =
   /** 한 플레이어의 이동 입력이 처리되었을 때 (body.t 시각의 물리 상태, s = 처리한 입력 순번) */
   | { t: "move"; id: string; body: Body; s: number }
   | { t: "notice"; code: "player_left_game"; message: string }
+  /** 집 작업 상태가 바뀌었을 때 (시작/중단/완료)만 보낸다 */
+  | { t: "work"; work: WorkInfo; serverTime: number }
   | { t: "error"; code: ErrorCode; message: string };
 
 const isSeq = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 1e9;
@@ -101,6 +122,13 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case "jump":
       if (!isSeq(m.s)) return null;
       return { t: "jump", s: m.s };
+    case "hold_start":
+      return { t: "hold_start" };
+    case "hold_stop":
+      return { t: "hold_stop" };
+    case "debug_teleport":
+      if (typeof m.x !== "number" || typeof m.y !== "number" || !Number.isFinite(m.x) || !Number.isFinite(m.y)) return null;
+      return { t: "debug_teleport", x: m.x, y: m.y };
     case "debug_phase":
       if (!PHASES.includes(m.phase as Phase)) return null;
       return { t: "debug_phase", phase: m.phase as Phase };

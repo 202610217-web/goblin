@@ -64,6 +64,17 @@ export function nextOnTimeout(s: PhaseState, now: number): PhaseState {
   }
 }
 
+/**
+ * 집 작업 완료 시 다음 단계.
+ * - 부수기 완료 → REPAIR (수리 1분 시작)
+ * - 수리 완료 → ROUND_END (수비팀 승점은 5단계 점수 판정 함수에서 처리)
+ */
+export function nextOnWorkComplete(s: PhaseState, kind: "BREAK" | "REPAIR", now: number): PhaseState {
+  if (kind === "BREAK" && s.phase === "ATTACK") return enterPhase(s, "REPAIR", now);
+  if (kind === "REPAIR" && s.phase === "REPAIR") return enterPhase(s, "ROUND_END", now);
+  return s;
+}
+
 /** 디버그용 강제 단계 전환 */
 export function forcePhase(s: PhaseState, phase: Phase, now: number): PhaseState {
   if (phase === "LOBBY") return initialPhase();

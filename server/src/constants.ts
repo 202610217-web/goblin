@@ -53,3 +53,15 @@ export const MOVE_RATE_LIMIT_PER_SEC = 5;
 export const JUMP_RATE_LIMIT_PER_SEC = 3;
 /** 이동 상태를 storage에 저장하는 최소 간격 (쓰기 횟수 절약) */
 export const MOVE_PERSIST_INTERVAL_MS = 1_000;
+
+// ---------- 3단계: 집 작업 (꾹 누르기) ----------
+/** 부수기 작업 시간 (혼자 0% → 100%) */
+export const BREAK_TIME_MS = 30_000;
+/** 수리 작업 시간 */
+export const REPAIR_TIME_MS = 20_000;
+/** 체크포인트 비율: 버튼을 떼면 이보다 낮으면 0, 이상이면 이 값으로 되돌아감 */
+export const WORK_CHECKPOINT = 0.5;
+/** 같은 팀 2명 이상이 동시에 누를 때 속도 배수 (1.0 = 1명과 같음) */
+export const WORK_MULTI_SPEED = 1.0;
+/** 작업 가능 거리는 클라이언트도 알아야 해서 shared/world.ts에 있다 */
+export { HOUSE_WORK_DISTANCE, HOUSE_WORK_MAX_FOOT_Z } from "../../shared/world";

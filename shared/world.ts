@@ -77,3 +77,22 @@ function buildBoxes(): Box[] {
 }
 
 export const BOXES: readonly Box[] = buildBoxes();
+
+/** 집 작업(부수기/수리) 가능 거리: 집 벽면에서 수평 거리 (m) */
+export const HOUSE_WORK_DISTANCE = 1.2;
+/** 집 작업은 땅 높이 근처에서만 가능 (발 높이가 이 값 이하) */
+export const HOUSE_WORK_MAX_FOOT_Z = 0.5;
+
+/** (x, y)에서 해당 팀 집 벽면까지의 수평 거리 (집 안이면 0) */
+export function distanceToHouse(team: TeamId, x: number, y: number): number {
+  const h = HOUSES[team];
+  const half = h.size / 2;
+  const dx = Math.max(Math.abs(x - h.x) - half, 0);
+  const dy = Math.max(Math.abs(y - h.y) - half, 0);
+  return Math.hypot(dx, dy);
+}
+
+/** 이 위치에서 해당 팀 집 작업이 가능한 거리인지 (캐릭터 몸 두께 포함) */
+export function isNearHouse(team: TeamId, x: number, y: number, z: number): boolean {
+  return z <= HOUSE_WORK_MAX_FOOT_Z && distanceToHouse(team, x, y) <= HOUSE_WORK_DISTANCE + PHYS.PLAYER_HALF;
+}

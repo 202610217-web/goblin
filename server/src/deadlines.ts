@@ -3,7 +3,10 @@
 // 가장 가까운 시각으로 알람을 다시 건다.
 // 이후 단계에서 페이즈 종료/작업 완료/사망/치유 완료 등이 kind로 추가된다.
 
-export type DeadlineKind = "reconnect" | "phase";
+export type DeadlineKind = "reconnect" | "phase" | "work";
+
+/** 같은 시각에 겹치면 먼저 처리할 순서 (작업 완료가 시간 초과보다 먼저) */
+const PRIORITY: Record<DeadlineKind, number> = { work: 0, phase: 1, reconnect: 2 };
 
 export interface Deadline {
   kind: DeadlineKind;
@@ -32,7 +35,7 @@ export function nextDeadlineAt(list: Deadline[]): number | null {
 
 /** now 시점까지 지난 마감들(시각 순)과 남은 목록으로 나눈다 */
 export function splitDue(list: Deadline[], now: number): { due: Deadline[]; rest: Deadline[] } {
-  const due = list.filter((d) => d.at <= now).sort((a, b) => a.at - b.at);
+  const due = list.filter((d) => d.at <= now).sort((a, b) => a.at - b.at || PRIORITY[a.kind] - PRIORITY[b.kind]);
   const rest = list.filter((d) => d.at > now);
   return { due, rest };
 }

@@ -16,7 +16,21 @@ import {
   SESSION_TOKEN_BYTES,
   SPAWNS,
 } from "./constants";
-import { type Body, makeBody, roundBody, withAngle, withJump } from "../../shared/sim";
+import { type Body, groundHeightAt, makeBody, roundBody, simulate, withAngle, withJump } from "../../shared/sim";
+import { PHYS, isNearHouse } from "../../shared/world";
+import {
+  type HoldRejectReason,
+  type WorkState,
+  checkHoldStart,
+  completionAt,
+  isComplete,
+  startHold,
+  stopHold,
+  targetHouseTeam,
+  workForPhase,
+  workRate,
+  DEFAULT_WORK_RULES,
+} from "./work";
 import { type Deadline, nextDeadlineAt, removeDeadline, splitDue, upsertDeadline } from "./deadlines";
 import { assignTeam, canSwitchTeam, sanitizeNickname } from "./lobby";
 import {
@@ -26,6 +40,7 @@ import {
   forcePhase,
   initialPhase,
   nextOnTimeout,
+  nextOnWorkComplete,
   startMatch,
 } from "./phase";
 import {
@@ -35,6 +50,7 @@ import {
   type PublicPlayer,
   type ServerMessage,
   type Team,
+  type WorkInfo,
   parseClientMessage,
 } from "./protocol";
 
@@ -58,6 +74,8 @@ interface PlayerRecord {
 /** storage에 저장되는 방 상태 */
 interface RoomState extends PhaseState {
   code: string;
+  /** 집 작업(부수기/수리) 상태 */
+  work: WorkState;
   players: PlayerRecord[];
   deadlines: Deadline[];
 }
@@ -74,6 +92,15 @@ interface RateWindow {
 }
 
 const STATE_KEY = "room";
+
+/** hold_start 거부 사유 → 안내 문구 */
+const HOLD_REJECT_TEXT: Record<HoldRejectReason, string> = {
+  wrong_phase: "지금은 집 작업을 할 수 없어요",
+  wrong_team: "우리 팀이 할 수 있는 작업이 아니에요",
+  not_connected: "연결 상태를 확인해 주세요",
+  too_far: "집에 더 가까이 가야 해요",
+  already_holding: "이미 작업 중이에요",
+};
 
 /** 팀 안 index번째 시작 위치에 선 물리 상태 */
 function spawnBody(team: Team, index: number, now: number): Body {
@@ -103,7 +130,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 function emptyState(code: string): RoomState {
-  return { code, ...initialPhase(), players: [], deadlines: [] };
+  return { code, ...initialPhase(), work: workForPhase("LOBBY", 0), players: [], deadlines: [] };
 }
 
 /** 1초 창 안에서 limit 개까지 허용 */
@@ -268,7 +295,8 @@ export class GameRoom extends DurableObject<Env> {
           return this.sendError(ws, "rate_limited", "이동 메시지가 너무 많아요");
         }
         player.seq = msg.s;
-        const movable = canMoveIn(st.phase);
+        // 작업 중에는 그 자리에 고정 (이동 의도만 기억했다가 버튼을 떼면 적용)
+        const movable = canMoveIn(st.phase) && !this.isHolding(player.id);
         if (msg.t === "move") {
           player.wantA = msg.a;
           // 이동 불가 단계면 정지 상태 유지 (원하는 방향만 기억)
@@ -281,6 +309,46 @@ export class GameRoom extends DurableObject<Env> {
         this.movesDirty = true;
         // 바뀐 게 없어도 응답(순번 확인)은 보낸다. 서버→클라이언트 메시지는 요청 수에 포함되지 않는다
         this.broadcastMove(player);
+        return;
+      }
+
+      case "hold_start": {
+        const body = simulate(player.body, now);
+        const target = targetHouseTeam(st.attackingTeam);
+        const reason = checkHoldStart({
+          phase: st.phase,
+          attackingTeam: st.attackingTeam,
+          playerTeam: player.team,
+          connected: player.conn === "CONNECTED",
+          nearTarget: isNearHouse(target, body.x, body.y, body.z),
+          alreadyHolding: this.isHolding(player.id),
+        });
+        if (reason) return this.sendError(ws, "cannot_work", HOLD_REJECT_TEXT[reason]);
+        player.body = stopped(player.body, now); // 작업 중에는 제자리 고정
+        st.work = startHold(st.work, player.id, now);
+        this.scheduleWork();
+        await this.saveAndSchedule();
+        this.broadcastMove(player);
+        this.broadcastWork(now);
+        return;
+      }
+
+      case "hold_stop":
+        if (!this.releaseHold(player, now)) return; // 누르고 있지 않았으면 무시
+        await this.saveAndSchedule();
+        this.broadcastMove(player);
+        this.broadcastWork(now);
+        return;
+
+      case "debug_teleport": {
+        if (this.env.DEBUG_COMMANDS !== "true") return this.sendError(ws, "debug_disabled", "디버그 명령이 꺼져 있어요");
+        const x = Math.min(PHYS.MAP_X - PHYS.PLAYER_HALF, Math.max(PHYS.PLAYER_HALF, msg.x));
+        const y = Math.min(PHYS.MAP_Y - PHYS.PLAYER_HALF, Math.max(PHYS.PLAYER_HALF, msg.y));
+        this.releaseHold(player, now);
+        player.body = { ...makeBody(x, y, now), z: groundHeightAt(x, y, 100) };
+        this.movesDirty = true;
+        this.broadcastMove(player);
+        this.broadcastWork(now);
         return;
       }
 
@@ -325,11 +393,13 @@ export class GameRoom extends DurableObject<Env> {
     if (player && player.conn === "CONNECTED" && this.socketsOf(player.id, ws).length === 0) {
       player.conn = "RECONNECTING";
       player.reconnectDeadline = now + RECONNECT_GRACE_MS;
-      player.body = stopped(player.body, now); // 재접속 대기 중에는 정지
       player.wantA = -1;
+      this.releaseHold(player, now); // 작업 중이었다면 중단
+      player.body = stopped(player.body, now); // 재접속 대기 중에는 정지
       st.deadlines = upsertDeadline(st.deadlines, { kind: "reconnect", key: player.id, at: player.reconnectDeadline });
       await this.saveAndSchedule();
       this.broadcastRoomState(now);
+      this.broadcastWork(now);
     }
     await this.cleanupIfEmpty();
   }
@@ -359,6 +429,10 @@ export class GameRoom extends DurableObject<Env> {
         if (d.kind === "phase") {
           // 단계 제한 시간 종료 → 다음 단계 (원래 마감 시각 기준으로 계산)
           if (st.phaseEndsAt !== null && st.phaseEndsAt <= now) this.applyPhase(nextOnTimeout(st, d.at), d.at);
+        } else if (d.kind === "work") {
+          // 집 작업 100% → 부수기 완료는 REPAIR, 수리 완료는 ROUND_END (판정 시각은 완료 예정 시각)
+          const kind = st.work.kind;
+          if (kind && isComplete(st.work, d.at)) this.applyPhase(nextOnWorkComplete(st, kind, d.at), d.at);
         } else if (d.kind === "reconnect") {
           // 재접속 대기 시간 초과 → 이탈 처리
           const p = st.players.find((x) => x.id === d.key && x.conn === "RECONNECTING");
@@ -375,6 +449,41 @@ export class GameRoom extends DurableObject<Env> {
     }
   }
 
+  // ---------- 집 작업 ----------
+  private isHolding(playerId: string): boolean {
+    return this.state?.work.holders.includes(playerId) ?? false;
+  }
+
+  /** 이 플레이어의 작업을 중단 (버튼 뗌/접속 끊김/퇴장). 중단했으면 true */
+  private releaseHold(player: PlayerRecord, now: number): boolean {
+    const st = this.state!;
+    if (!st.work.holders.includes(player.id)) return false;
+    st.work = stopHold(st.work, player.id, now);
+    // 고정 해제: 누르고 있던 이동 방향이 있으면 바로 출발
+    if (canMoveIn(st.phase) && player.conn === "CONNECTED") player.body = roundBody(withAngle(player.body, player.wantA, now));
+    this.movesDirty = true;
+    this.scheduleWork();
+    return true;
+  }
+
+  /** 작업 완료 예정 시각을 마감 시각 목록에 넣는다 (아무도 안 누르면 제거) */
+  private scheduleWork() {
+    const st = this.state!;
+    const at = completionAt(st.work);
+    st.deadlines = at === null
+      ? removeDeadline(st.deadlines, "work", "work")
+      : upsertDeadline(st.deadlines, { kind: "work", key: "work", at });
+  }
+
+  private workInfo(): WorkInfo {
+    const w = this.state!.work;
+    return { ...w, rate: workRate(w), completesAt: completionAt(w), checkpoint: DEFAULT_WORK_RULES.checkpoint };
+  }
+
+  private broadcastWork(now: number) {
+    if (this.state) this.broadcast({ t: "work", work: this.workInfo(), serverTime: now });
+  }
+
   // ---------- 단계 전환 ----------
   /** 로비에서 시작 조건이 맞으면 게임 시작 */
   private tryStartMatch(now: number) {
@@ -388,6 +497,12 @@ export class GameRoom extends DurableObject<Env> {
     const st = this.state!;
     const enteredNewRound = next.phase === "COUNTDOWN" && (st.phase !== "COUNTDOWN" || st.round !== next.round);
     const becameMovable = !canMoveIn(st.phase) && canMoveIn(next.phase);
+    const prevHolders = st.work.holders;
+    // 단계가 바뀌면 작업은 중단되고, 새 단계에 맞는 작업(0%)으로 초기화
+    if (next.phase !== st.phase || next.round !== st.round) {
+      st.work = workForPhase(next.phase, now);
+      st.deadlines = removeDeadline(st.deadlines, "work", "work");
+    }
     st.phase = next.phase;
     st.round = next.round;
     st.attackingTeam = next.attackingTeam;
@@ -407,6 +522,14 @@ export class GameRoom extends DurableObject<Env> {
       for (const p of st.players) if (p.conn === "CONNECTED") p.body = roundBody(withAngle(p.body, p.wantA, now));
     }
     if (st.phase === "LOBBY") for (const p of st.players) p.ready = false;
+    // 부수기 완료로 REPAIR가 되면 작업하던 공격팀은 고정이 풀려 바로 움직일 수 있다
+    if (canMoveIn(st.phase) && !becameMovable) {
+      for (const p of st.players) {
+        if (prevHolders.includes(p.id) && !st.work.holders.includes(p.id) && p.conn === "CONNECTED") {
+          p.body = roundBody(withAngle(p.body, p.wantA, now));
+        }
+      }
+    }
 
     st.deadlines = st.phaseEndsAt === null
       ? removeDeadline(st.deadlines, "phase", "phase")
@@ -446,6 +569,7 @@ export class GameRoom extends DurableObject<Env> {
   /** 플레이어 제거. 게임 중에 인원이 빠지면 (임시 규칙) 로비로 돌아간다 */
   private async removePlayers(ids: string[], now: number) {
     const st = await this.load();
+    for (const p of st.players) if (ids.includes(p.id)) this.releaseHold(p, now);
     st.players = st.players.filter((p) => !ids.includes(p.id));
     for (const id of ids) st.deadlines = removeDeadline(st.deadlines, "reconnect", id);
     if (st.phase !== "LOBBY" && ids.length > 0) {
@@ -506,6 +630,7 @@ export class GameRoom extends DurableObject<Env> {
       round: st.round,
       attackingTeam: st.attackingTeam,
       phaseEndsAt: st.phaseEndsAt,
+      work: this.workInfo(),
       players: this.publicPlayers(),
       serverTime: now,
     });
