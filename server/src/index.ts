@@ -4,6 +4,7 @@ import { isOriginAllowed, makeOriginPolicy } from "./origin";
 import testPage from "./dev/test.html";
 
 export { GameRoom } from "./room";
+export { SignalRoom } from "./signal";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -14,7 +15,8 @@ export default {
       return new Response(testPage, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
 
-    if (url.pathname !== "/ws") return new Response("Not found", { status: 404 });
+    // /ws = Cloudflare 방 서버, /signal = "내 기기로 방 열기"용 연결 중계
+    if (url.pathname !== "/ws" && url.pathname !== "/signal") return new Response("Not found", { status: 404 });
 
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return new Response("WebSocket 연결만 가능해요", { status: 426 });
@@ -28,6 +30,11 @@ export default {
 
     const room = normalizeRoomCode(url.searchParams.get("room"));
     if (!room) return new Response("방 코드는 4~6자리 영문/숫자예요", { status: 400 });
+
+    if (url.pathname === "/signal") {
+      // 연결 중계는 아주 가볍고 연결할 때만 쓰므로 위치 힌트 없이 만든다
+      return env.SIGNAL_ROOM.get(env.SIGNAL_ROOM.idFromName(room)).fetch(request);
+    }
 
     // 방 코드 이름으로 Durable Object를 찾는다 (같은 코드 = 같은 방)
     // 방 서버는 처음 만들어질 때 위치가 정해진다. 위치 힌트(예: apac = 아시아·태평양)가 있으면

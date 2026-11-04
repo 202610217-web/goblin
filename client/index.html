@@ -26,6 +26,10 @@
       <button id="randomRoom" class="secondary">새 방 코드</button>
       <button id="joinBtn">입장</button>
     </div>
+    <div class="row">
+      <button id="hostBtn" class="secondary">📡 내 기기로 방 만들기</button>
+    </div>
+    <p class="hint small">내 기기로 방을 만들면 이 기기가 게임 서버가 되고, 친구들이 이 기기에 직접 연결해요 (와이파이에서도 빨라요). 친구는 방 코드로 <b>입장</b>만 누르면 돼요.</p>
     <p id="joinError" class="error"></p>
     <p id="a2hsHint" class="hint hidden">홈 화면에 추가하면 전체 화면으로 즐길 수 있어요 (공유 버튼 → 홈 화면에 추가)</p>
   </div>
@@ -37,6 +41,7 @@
       <div class="team A"><h3>A팀</h3><div id="teamA"></div><button data-team="A" class="secondary">A팀으로</button></div>
       <div class="team B"><h3>B팀</h3><div id="teamB"></div><button data-team="B" class="secondary">B팀으로</button></div>
     </div>
+    <p id="connNotice" class="hint small hidden"></p>
     <div class="row"><button id="readyBtn">준비</button><button id="leaveBtn" class="secondary">나가기</button></div>
     <p class="hint">4명이 모두 준비하면 시작해요. 친구에게 방 코드 <b id="lobbyRoom2"></b> 를 알려 주세요.</p>
     <div class="row practice">

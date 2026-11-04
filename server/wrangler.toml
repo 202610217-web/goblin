@@ -8,10 +8,19 @@ compatibility_date = "2025-09-01"
 name = "GAME_ROOM"
 class_name = "GameRoom"
 
+# "내 기기로 방 열기"용 연결 중계 (게임 데이터는 오가지 않음)
+[[durable_objects.bindings]]
+name = "SIGNAL_ROOM"
+class_name = "SignalRoom"
+
 # 무료 플랜은 SQLite 방식 Durable Object만 사용 가능
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["GameRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["SignalRoom"]
 
 # 테스트용 HTML 페이지를 문자열로 import 하기 위한 규칙
 [[rules]]
@@ -40,6 +49,10 @@ name = "goblin-server-test"
 [[env.test.durable_objects.bindings]]
 name = "GAME_ROOM"
 class_name = "GameRoom"
+
+[[env.test.durable_objects.bindings]]
+name = "SIGNAL_ROOM"
+class_name = "SignalRoom"
 
 [env.test.vars]
 # GitHub Pages 주소(경로 /goblin/ 은 Origin에 포함되지 않음)만 허용

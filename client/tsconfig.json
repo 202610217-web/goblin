@@ -9,7 +9,9 @@
     "noUncheckedIndexedAccess": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": { "@goblin/room": ["./src/host/gameRoomTypes.d.ts"] }
   },
   "include": ["src", "../shared"]
 }

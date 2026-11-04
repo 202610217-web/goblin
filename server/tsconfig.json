@@ -9,7 +9,9 @@
     "noUncheckedIndexedAccess": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": { "@goblin/room": ["./src/room.ts"] }
   },
-  "include": ["src", "tests", "../shared"]
+  "include": ["src", "tests", "../shared", "../client/src/host/hostRoom.ts"]
 }

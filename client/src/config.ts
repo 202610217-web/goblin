@@ -35,6 +35,8 @@ export const CONFIG = {
   CORRECTION_SMOOTH_MS: 120,
   /** 이 거리 이상 차이 나면 부드럽게 하지 않고 바로 이동 (m) */
   SNAP_DISTANCE: 3,
+  /** 기기 직접 연결: 이 시간 안에 연결되지 않으면 실패로 본다 (ms) */
+  P2P_CONNECT_TIMEOUT_MS: 12_000,
   /** 자동 재접속 대기 시간 (지수 백오프, 마지막 값 반복) */
   RECONNECT_DELAYS_MS: [1000, 2000, 4000, 8000],
   /** 진동 패턴 (ms): 맞았을 때, 기절했을 때 */

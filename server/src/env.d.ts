@@ -1,6 +1,8 @@
 // Worker 환경변수/바인딩 타입 (wrangler.toml과 맞춘다)
 interface Env {
   GAME_ROOM: DurableObjectNamespace<import("./room").GameRoom>;
+  /** "내 기기로 방 열기"용 연결 중계 */
+  SIGNAL_ROOM: DurableObjectNamespace<import("./signal").SignalRoom>;
   ALLOWED_ORIGINS: string;
   ALLOW_LAN_ORIGINS: string;
   SERVE_TEST_PAGE: string;

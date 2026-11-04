@@ -255,21 +255,29 @@ export class GameRoom extends DurableObject<Env> {
 
   // ---------- 접속 ----------
   async fetch(request: Request): Promise<Response> {
-    const code = request.headers.get("X-Room-Code") ?? "";
     if (this.ctx.getWebSockets().length >= MAX_SOCKETS_PER_ROOM) {
       return new Response("Too many connections", { status: 503 });
     }
+    const pair = new WebSocketPair();
+    const [client, server] = [pair[0], pair[1]];
+    if (this.roomColo === null) this.roomColo = this.findRoomColo(); // 이 방 서버 위치는 한 번만 알아낸다
+    await this.acceptPeer(server, request.headers.get("X-Room-Code") ?? "", request.headers.get("X-Edge-Colo") ?? "?");
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /**
+   * 새 연결 받기. Cloudflare(fetch)와 "내 기기로 방 열기"(호스트 기기 브라우저)가 함께 쓴다.
+   * edge = 이 연결이 들어온 위치 표시 (핑 진단용)
+   */
+  async acceptPeer(server: WebSocket, code: string, edge: string, roomLabel?: string): Promise<void> {
     if (!this.state) {
       this.state = emptyState(code);
       await this.save();
     }
-    const pair = new WebSocketPair();
-    const [client, server] = [pair[0], pair[1]];
+    if (roomLabel && this.roomColo === null) this.roomColo = Promise.resolve(roomLabel);
     this.ctx.acceptWebSocket(server); // ws.accept()는 쓰지 않는다 (Hibernation)
     this.stats.connects++;
-    server.serializeAttachment({ playerId: null, edge: request.headers.get("X-Edge-Colo") ?? "?" } satisfies SocketAttachment);
-    if (this.roomColo === null) this.roomColo = this.findRoomColo(); // 이 방 서버 위치는 한 번만 알아낸다
-    return new Response(null, { status: 101, webSocket: client });
+    server.serializeAttachment({ playerId: null, edge } satisfies SocketAttachment);
   }
 
   // ---------- 메시지 ----------

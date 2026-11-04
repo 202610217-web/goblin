@@ -9,6 +9,8 @@ import { CONFIG } from "./config";
 import { Input } from "./input";
 import { Net } from "./net";
 import { PlayerView, World3D } from "./world3d";
+import { HostRoom } from "./host/hostRoom";
+import { P2PHost } from "./p2p";
 import { fullscreenSupported, isStandalone, keepScreenOn, setVibration, toggleFullscreen, vibrate, vibrationEnabled } from "./device";
 
 // ---------- 서버 주소 ----------
@@ -44,6 +46,8 @@ const input = new Input($("touch"), $("stickBase"), $("stickKnob"), { jump: $("j
 const net = new Net(SERVER_URL);
 
 let myId: string | null = null;
+/** "내 기기로 방 만들기"를 했을 때: 이 기기 안의 방 서버와 연결 중계 */
+let p2pHost: P2PHost | null = null;
 let roomCode = "";
 let room: RoomStateMessage | null = null;
 let work: WorkInfo | null = null;
@@ -104,21 +108,54 @@ $("randomRoom").onclick = () => {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   roomInput.value = Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
 };
-$("joinBtn").onclick = () => {
+/** 입력한 방 코드 확인 (없으면 새로 만든다) */
+function readRoomCode(makeIfEmpty: boolean): string | null {
+  if (makeIfEmpty && !roomInput.value.trim()) ($("randomRoom") as HTMLButtonElement).click();
   const code = roomInput.value.trim().toUpperCase();
-  if (!/^[A-Z0-9]{4,6}$/.test(code)) return showJoinError("방 코드는 4~6자리 영문/숫자예요");
+  if (!/^[A-Z0-9]{4,6}$/.test(code)) { showJoinError("방 코드는 4~6자리 영문/숫자예요"); return null; }
   try { localStorage.setItem("nickname", nickInput.value.trim()); } catch { /* 무시 */ }
-  roomCode = code;
-  showJoinError("연결 중...");
   (document.activeElement as HTMLElement | null)?.blur();
+  return code;
+}
+
+// 입장: 방에 호스트 기기가 있으면 그 기기에 직접 연결, 없으면 Cloudflare 방
+$("joinBtn").onclick = () => {
+  const code = readRoomCode(false);
+  if (!code) return;
+  roomCode = code;
+  stopHosting();
+  net.reset();
+  showJoinError("연결 중...");
   net.connect(code);
 };
+
+// 내 기기로 방 만들기: 이 기기가 게임 서버가 된다
+$("hostBtn").onclick = () => {
+  const code = readRoomCode(true);
+  if (!code) return;
+  roomCode = code;
+  stopHosting();
+  net.reset();
+  const hostRoom = new HostRoom(code, { DEBUG_COMMANDS: import.meta.env.DEV ? "true" : "false" });
+  p2pHost = new P2PHost(SERVER_URL, code, hostRoom);
+  p2pHost.onerror = (message) => goToJoin(message);
+  p2pHost.start();
+  net.useHost(hostRoom);
+  showJoinError("방을 여는 중...");
+  net.connect(code);
+};
+
+function stopHosting() {
+  p2pHost?.stop();
+  p2pHost = null;
+}
 function showJoinError(t: string) { $("joinError").textContent = t; }
 if (!fullscreenSupported() && !isStandalone()) $("a2hsHint").classList.remove("hidden");
 
 /** 처음 화면으로 돌아간다 (방 가득 참, 자리 만료, 나가기 등) */
 function goToJoin(message: string) {
   net.stop();
+  stopHosting();
   myId = null;
   room = null;
   work = null;
@@ -139,6 +176,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-team]").forEach((b) => {
 $("readyBtn").onclick = () => net.send({ t: "set_ready", ready: !myInfo()?.ready });
 $("leaveBtn").onclick = () => {
   net.send({ t: "leave" });
+  // 호스트가 나가면 방이 닫힌다 (손님들에게 알림이 간다)
   try { sessionStorage.removeItem(tokenKey()); } catch { /* 무시 */ }
   goToJoin("");
 };
@@ -195,6 +233,11 @@ net.onOpen = () => {
   net.send({ t: "join", nickname: nickInput.value, token });
 };
 net.onClose = (code, willRetry, delay) => {
+  if (code === 4410) { goToJoin("호스트가 방을 닫았어요."); return; }
+  if (!myId && code === 4408) {
+    showJoinError("호스트 기기와 직접 연결하지 못했어요. 같은 와이파이에 연결해 보거나, 다른 사람이 방을 만들어 보세요.");
+    return;
+  }
   if (myId && willRetry) {
     $("reconnecting").classList.remove("hidden");
     $("reconnectInfo").textContent = `${Math.round(delay / 1000)}초 후 다시 시도해요`;
@@ -206,7 +249,8 @@ net.onMessage = (m) => {
   switch (m.t) {
     case "welcome":
       myId = m.playerId;
-      route = m.edge && m.roomColo ? `${m.edge}→${m.roomColo}` : "";
+      // 기기 직접 연결이면 연결 종류를, Cloudflare면 "들어온 위치→방 서버 위치"를 보여 준다
+      route = net.label || (m.edge && m.roomColo ? `${m.edge}→${m.roomColo}` : "");
       try { sessionStorage.setItem(tokenKey(), m.token); } catch { /* 무시 */ }
       net.autoReconnect = true; // 이제부터 끊기면 자동 재접속
       lastSentA = -2; // 접속 직후 현재 입력을 다시 보낸다
@@ -444,6 +488,14 @@ function renderLobby() {
       return d;
     }));
   }
+  // 연결 방식 안내
+  const notice = $("connNotice");
+  if (net.mode === "host") {
+    notice.textContent = "📡 이 기기가 방 서버예요. 게임 중에 화면을 끄거나 다른 앱으로 가면 모두 멈춰요. 친구는 방 코드로 입장하면 돼요.";
+  } else if (net.mode === "p2p") {
+    notice.textContent = `📡 호스트 기기에 연결됨 (${net.label})`;
+  } else notice.textContent = "";
+  notice.classList.toggle("hidden", !notice.textContent);
   const bots = room.players.filter((p) => p.bot).length;
   $("addBotsBtn").classList.toggle("hidden", room.players.length >= 4);
   $("removeBotsBtn").classList.toggle("hidden", bots === 0);
