@@ -71,3 +71,35 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     expect(a.closed).toBe(4410);
   });
 });
+
+describe("순서 없이 도착하는 이동 (기기 직접 연결의 빠른 통로)", () => {
+  it("더 새 입력보다 늦게 도착한 이동은 버리고, 재접속하면 순번을 다시 센다", async () => {
+    const host = new HostRoom("SEQQ", { DEBUG_COMMANDS: "true" });
+    const a = fakePeer();
+    host.addPeer(a, "HOST");
+    await tick();
+    a.push({ t: "join", nickname: "A" });
+    await tick(5);
+    a.push({ t: "debug_phase", phase: "ATTACK" });
+    await tick(5);
+    a.push({ t: "move", a: 8, s: 5 });
+    a.push({ t: "move", a: 3, s: 4 }); // 늦게 도착한 옛 입력
+    await tick(5);
+    const id = last(a, "welcome").playerId;
+    const moves = a.got.filter((m) => m.t === "move" && m.id === id);
+    expect(moves.at(-1).body.a).toBe(8);
+    // 새로고침한 화면처럼 순번 1부터 다시 보내도 받아 준다
+    const token = last(a, "welcome").token;
+    a.onclose(1006);
+    await tick(5);
+    const a2 = fakePeer();
+    host.addPeer(a2, "HOST");
+    await tick();
+    a2.push({ t: "join", nickname: "", token });
+    await tick(5);
+    a2.push({ t: "move", a: 16, s: 1 });
+    await tick(5);
+    expect(a2.got.filter((m) => m.t === "move" && m.id === id).at(-1).body.a).toBe(16);
+    host.stop();
+  });
+});

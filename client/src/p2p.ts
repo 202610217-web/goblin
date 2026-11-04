@@ -60,16 +60,29 @@ async function routeLabel(pc: RTCPeerConnection): Promise<string> {
   }
 }
 
+/**
+ * 빠른 통로(순서 없음, 잃어버린 조각은 그 메시지만 다시 받음)로 보낼 메시지:
+ * 이동/점프/핑과 다른 사람 위치. 조각 하나가 늦어도 다른 메시지가 기다리지 않는다.
+ * 나머지(방 상태, 점수, 타격 결과 등)는 순서가 중요해서 기본 통로로 보낸다.
+ */
+const isFast = (text: string) =>
+  text === "ping" || text === "pong" || text.startsWith('{"t":"move"') || text.startsWith('{"t":"jump"');
+const FAST_LABEL = "fast";
+
 /** DataChannel은 닫을 때 이유(코드)를 못 보내므로, 닫기 직전에 이 표시로 시작하는 메시지로 알린다 */
 const CLOSE_PREFIX = "\u0000close:";
 
 /** DataChannel을 PeerLink 모양으로 (호스트 쪽에서 방 서버에 넘긴다) */
-function channelLink(ch: RTCDataChannel, pc: RTCPeerConnection): PeerLink {
+function channelLink(ch: RTCDataChannel, pc: RTCPeerConnection, fast: () => RTCDataChannel | undefined): PeerLink {
   let closed = false;
   const link: PeerLink = {
     onmessage: () => {},
     onclose: () => {},
-    send: (text) => { if (ch.readyState === "open") ch.send(text); },
+    send: (text) => {
+      const f = fast();
+      if (f?.readyState === "open" && isFast(text)) f.send(text);
+      else if (ch.readyState === "open") ch.send(text);
+    },
     close: (code = 1000) => {
       if (closed) return;
       closed = true;
@@ -130,9 +143,20 @@ export class P2PHost {
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       this.peers.set(m.id, pc);
       pc.onicecandidate = (e) => { if (e.candidate) this.signal?.send({ t: "to", id: m.id, data: { ice: e.candidate.toJSON() } }); };
+      let fast: RTCDataChannel | undefined;
+      let link: PeerLink | null = null;
       pc.ondatachannel = (e) => {
         const ch = e.channel;
-        ch.onopen = () => this.hostRoom.addPeer(channelLink(ch, pc), "P2P");
+        if (ch.label === FAST_LABEL) {
+          // 빠른 통로로 온 메시지도 같은 손님의 메시지로 넘긴다
+          fast = ch;
+          ch.onmessage = (ev) => { if (typeof ev.data === "string") link?.onmessage(ev.data); };
+          return;
+        }
+        ch.onopen = () => {
+          link = channelLink(ch, pc, () => fast);
+          this.hostRoom.addPeer(link, "P2P");
+        };
       };
       await pc.setRemoteDescription(sdp);
       const answer = await pc.createAnswer();
@@ -153,6 +177,7 @@ export class P2PGuestTransport implements Transport {
   private signal: Signal;
   private pc: RTCPeerConnection | null = null;
   private ch: RTCDataChannel | null = null;
+  private fast: RTCDataChannel | null = null;
   private done = false;
   private gotRoom = false;
   private timer = 0;
@@ -175,7 +200,10 @@ export class P2PGuestTransport implements Transport {
 
   get open() { return this.ch?.readyState === "open"; }
   get connecting() { return !this.done && !this.open; }
-  send(text: string) { if (this.open) this.ch!.send(text); }
+  send(text: string) {
+    if (this.fast?.readyState === "open" && isFast(text)) this.fast.send(text);
+    else if (this.open) this.ch!.send(text);
+  }
   close() { this.finish(1000); }
 
   private finish(code: number) {
@@ -183,7 +211,7 @@ export class P2PGuestTransport implements Transport {
     this.done = true;
     clearTimeout(this.timer);
     this.signal.close();
-    try { this.ch?.close(); this.pc?.close(); } catch { /* 무시 */ }
+    try { this.ch?.close(); this.fast?.close(); this.pc?.close(); } catch { /* 무시 */ }
     this.onclose(code);
   }
 
@@ -209,6 +237,10 @@ export class P2PGuestTransport implements Transport {
     this.pc = pc;
     const ch = pc.createDataChannel("game", { ordered: true });
     this.ch = ch;
+    // 순서 없는 빠른 통로 (잃어버린 조각은 그 메시지만 다시 보냄)
+    const fast = pc.createDataChannel(FAST_LABEL, { ordered: false });
+    this.fast = fast;
+    fast.onmessage = (e) => { if (typeof e.data === "string") this.onmessage(e.data); };
     pc.onicecandidate = (e) => { if (e.candidate) this.signal.send({ t: "to", id: hostId, data: { ice: e.candidate.toJSON() } }); };
     ch.onopen = async () => {
       clearTimeout(this.timer);

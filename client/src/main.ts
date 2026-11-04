@@ -39,6 +39,8 @@ interface Actor {
   face: number;
   /** 서버가 보낸 최신 정보 */
   info: PublicPlayer;
+  /** 마지막으로 받은 서버 위치의 시각 (빠른 통로는 순서가 없어서, 더 오래된 위치는 무시) */
+  serverT: number;
 }
 
 const world = new World3D($("stage"));
@@ -362,12 +364,14 @@ function applyRoomState(s: RoomStateMessage) {
     let a = actors.get(p.id);
     if (!a || a.team !== p.team) {
       a?.view.dispose(world.scene);
-      a = { id: p.id, view: new PlayerView(world.scene, p.team, p.nickname, p.id === myId), team: p.team, body: p.body, off: { x: 0, y: 0, z: 0 }, face: 0, info: p };
+      a = { id: p.id, view: new PlayerView(world.scene, p.team, p.nickname, p.id === myId), team: p.team, body: p.body, off: { x: 0, y: 0, z: 0 }, face: 0, info: p, serverT: p.body.t };
       actors.set(p.id, a);
     }
     a.info = p;
     a.view.setNickname(p.id === myId ? `${p.nickname} (나)` : `${p.bot ? "🤖 " : ""}${p.nickname}`);
-    if (p.id !== myId) reconcile(a, p.body, false);
+    if (p.id !== myId) {
+      if (p.body.t >= a.serverT) { a.serverT = p.body.t; reconcile(a, p.body, false); }
+    }
     else if (forceMe || p.seq >= lastSentSeq || p.combat.state !== prevMe?.combat.state) reconcile(a, p.body, true);
     // (아직 서버에 안 간 내 입력이 있으면 덮어쓰지 않는다 — 곧 오는 move 응답으로 맞춘다)
   }
@@ -394,6 +398,10 @@ function applyRoomState(s: RoomStateMessage) {
 function onMove(id: string, body: Body, s: number) {
   const a = actors.get(id);
   if (!a) return;
+  if (id !== myId) {
+    if (body.t < a.serverT) return; // 순서가 뒤바뀌어 늦게 온 옛 위치
+    a.serverT = body.t;
+  }
   if (id === myId) {
     // 내 입력이 서버에서 처리되어 돌아온 시간 = 왕복 시간 표본
     const t0 = sentAt.get(s);

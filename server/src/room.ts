@@ -323,6 +323,7 @@ export class GameRoom extends DurableObject<Env> {
         }
         existing.conn = "CONNECTED";
         existing.reconnectDeadline = null;
+        existing.seq = 0; // 새로고침한 화면은 입력 순번을 1부터 다시 센다
         st.deadlines = removeDeadline(st.deadlines, "reconnect", existing.id);
         ws.serializeAttachment({ ...(ws.deserializeAttachment() as SocketAttachment), playerId: existing.id } satisfies SocketAttachment);
         this.send(ws, this.welcome(existing, true, now, (ws.deserializeAttachment() as SocketAttachment | null)?.edge ?? "?", await (this.roomColo ?? Promise.resolve("?"))));
@@ -401,7 +402,9 @@ export class GameRoom extends DurableObject<Env> {
         if (limited) {
           return this.sendError(ws, "rate_limited", "이동 메시지가 너무 많아요");
         }
-        player.seq = msg.s;
+        // 기기 직접 연결의 빠른 통로는 순서를 지키지 않으므로, 더 새 입력보다 늦게 온 이동은 버린다
+        if (msg.t === "move" && msg.s < player.seq) return;
+        player.seq = Math.max(player.seq, msg.s);
         // 작업/치유 중이거나 기절/사망이면 그 자리에 고정 (이동 의도만 기억했다가 풀리면 적용)
         const movable = this.canMoveNow(player);
         // 화면에서 누른 시각 기준으로 처리 (화면 예측과 같은 계산 → 내 캐릭터가 뒤로 당겨지지 않음)
