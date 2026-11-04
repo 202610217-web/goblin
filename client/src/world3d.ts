@@ -109,30 +109,51 @@ export class World3D {
     }
   }
 
+  /** 지금 카메라 거리 비율 (1 = 기본 거리, 벽에 가리면 작아짐) */
+  camK = 1;
+
   /**
    * 3인칭 카메라: 오른쪽 어깨 뒤 위에서 바라본다.
-   * 서버 타격 판정과 같은 광선(shared/aim.ts aimRay)을 써서 화면 가운데 = 조준점이 되게 한다.
+   * - 서버 타격 판정과 같은 광선(shared/aim.ts aimRay)을 기준으로, 화면 가운데 = 조준점이 되게 한다.
+   * - 머리와 카메라 사이를 벽/집이 가리면 카메라를 머리 쪽으로 당긴다 (들어올 때는 즉시, 나갈 때는 부드럽게).
+   *   당겨져도 "정면 AIM_CONVERGE 앞 조준 지점"을 계속 바라보므로 가까운 상대 조준은 그대로 맞는다.
+   * 돌려주는 값: 카메라 거리 비율 (내 캐릭터를 반투명하게 할지 정할 때 사용)
    */
-  updateCamera(x: number, y: number, z: number) {
+  updateCamera(x: number, y: number, z: number, dt = 0): number {
     this.pitch = clampPitch(this.pitch);
-    const { origin, dir } = aimRay({ x, y, z } as Body, this.yaw, this.pitch);
-    // 카메라와 캐릭터 머리 사이를 벽/집이 가리면, 같은 조준선 위에서 카메라를 앞으로 당긴다
-    // (조준선 자체는 그대로라 조준점과 서버 판정이 달라지지 않는다)
+    const { origin } = aimRay({ x, y, z } as Body, this.yaw, this.pitch);
     const head = { x, y, z: z + AIM.CAMERA_TARGET_HEIGHT };
-    let t = 0;
-    for (let i = 0; i < 24 && this.blockedBetween(head, origin.x + dir.x * t, origin.y + dir.y * t, origin.z + dir.z * t); i++) t += 0.25;
-    World3D.toThree(origin.x + dir.x * t, origin.y + dir.y * t, origin.z + dir.z * t, this.camera.position);
-    this.camera.lookAt(World3D.toThree(origin.x + dir.x, origin.y + dir.y, origin.z + dir.z, tmp));
+    const d = { x: origin.x - head.x, y: origin.y - head.y, z: origin.z - head.z };
+    const len = Math.hypot(d.x, d.y, d.z);
+    const want = Math.max(CONFIG.CAMERA_MIN_RATIO, this.hitRatio(head, d) - CONFIG.CAMERA_WALL_MARGIN / len);
+    if (want < this.camK || dt === 0) this.camK = want; // 벽 쪽으로는 바로 (벽 너머가 보이지 않게)
+    else this.camK += (want - this.camK) * (1 - Math.exp(-dt / CONFIG.CAMERA_EASE_OUT_S)); // 돌아갈 때는 부드럽게
+    World3D.toThree(head.x + d.x * this.camK, head.y + d.y * this.camK, head.z + d.z * this.camK, this.camera.position);
+    // 조준 지점 = 머리에서 정면(카메라 방향)으로 AIM_CONVERGE 앞
+    const p = this.pitch, c = AIM.AIM_CONVERGE;
+    this.camera.lookAt(World3D.toThree(
+      x + Math.cos(this.yaw) * Math.cos(p) * c,
+      y + Math.sin(this.yaw) * Math.cos(p) * c,
+      head.z - Math.sin(p) * c, tmp));
+    return this.camK;
   }
 
-  /** 머리(head)에서 카메라 위치(cx,cy,cz)까지 선분이 상자에 막히는지 */
-  private blockedBetween(head: { x: number; y: number; z: number }, cx: number, cy: number, cz: number): boolean {
-    const d = { x: cx - head.x, y: cy - head.y, z: cz - head.z };
+  /** 머리에서 d 방향 선분(0~1)이 처음 벽/집(지붕 포함)에 닿는 비율. 안 닿으면 1 */
+  private hitRatio(head: { x: number; y: number; z: number }, d: { x: number; y: number; z: number }): number {
+    const pad = CONFIG.CAMERA_WALL_PAD;
+    let k = 1;
     for (const b of BOXES) {
-      const t = rayAabb(head, d, { x: b.x0 - 0.15, y: b.y0 - 0.15, z: b.z0 }, { x: b.x1 + 0.15, y: b.y1 + 0.15, z: b.z1 + 0.15 });
-      if (t !== null && t > 0.02 && t <= 1) return true;
+      const top = b.kind === "house" ? b.z1 + 2.6 : b.z1; // 집은 지붕까지
+      const t = rayAabb(head, d, { x: b.x0 - pad, y: b.y0 - pad, z: b.z0 - pad }, { x: b.x1 + pad, y: b.y1 + pad, z: top + pad });
+      if (t !== null && t < k) k = t;
     }
-    return false;
+    // 맵 밖 울타리 너머로도 나가지 않게
+    const bx = head.x + d.x, by = head.y + d.y;
+    for (const [v, dv, lo, hi] of [[bx, d.x, 0.3, PHYS.MAP_X - 0.3], [by, d.y, 0.3, PHYS.MAP_Y - 0.3]] as const) {
+      if (v < lo && dv < 0) k = Math.min(k, (lo - (v - dv)) / dv);
+      if (v > hi && dv > 0) k = Math.min(k, (hi - (v - dv)) / dv);
+    }
+    return Math.max(0, k);
   }
 
   render() {
@@ -229,6 +250,9 @@ export class PlayerView {
    * 위치/방향/상태 반영. state: 0=정상, 1=기절(눕고 반투명), 2=사망(눕고 회색)
    * invuln = 무적 중(깜빡임), dim = 재접속 대기 중(반투명)
    */
+  /** 카메라가 아주 가까우면 내 캐릭터를 숨긴다 (화면을 가리지 않게) */
+  nearCamera = false;
+
   update(x: number, y: number, z: number, faceRad: number, groundZ: number, state: 0 | 1 | 2, invuln: boolean, dim: boolean, nowMs: number) {
     World3D.toThree(x, y, z, this.group.position);
     this.group.rotation.y = faceRad;
@@ -246,6 +270,8 @@ export class PlayerView {
     if (dim || state === 1) opacity = 0.55;
     if (invuln && Math.floor(nowMs / 120) % 2 === 0) opacity = 0.3;
     this.bodyMat.opacity = opacity;
+    // 카메라가 캐릭터 바로 뒤까지 당겨지면 캐릭터를 숨겨서 화면을 가리지 않게 한다 (그림자는 남김)
+    this.pivot.visible = !this.nearCamera;
 
     const sw = Math.max(0, this.swingUntil - nowMs) / CONFIG.SWING_MS; // 1 → 0
     this.fist.position.x = PHYS.PLAYER_HALF + Math.sin(sw * Math.PI) * 0.7;
@@ -255,6 +281,7 @@ export class PlayerView {
 
   /** 이름표를 화면 좌표로 옮긴다 */
   placeLabel(camera: THREE.Camera, w: number, h: number) {
+    if (this.nearCamera) { this.label.style.display = "none"; return; }
     tmp.copy(this.group.position);
     tmp.y += PHYS.PLAYER_HEIGHT + 0.35;
     tmp.project(camera);

@@ -6,6 +6,13 @@ export const CONFIG = {
   CAMERA_FOV: 60,
   /** 3인칭 카메라 기본 내려다보는 각(라디안). 거리/높이/어깨 위치/각도 범위는 조준 판정과 같아야 해서 shared/aim.ts */
   CAMERA_PITCH_DEFAULT: 0.42,
+  /** 벽에 가릴 때: 벽에서 띄우는 거리(m), 상자 두께 여유(m), 가장 가까이 당기는 비율, 다시 멀어지는 시간(초) */
+  CAMERA_WALL_MARGIN: 0.25,
+  CAMERA_WALL_PAD: 0.2,
+  CAMERA_MIN_RATIO: 0.06,
+  CAMERA_EASE_OUT_S: 0.25,
+  /** 카메라 거리 비율이 이보다 작으면 내 캐릭터를 숨김 */
+  CAMERA_FADE_RATIO: 0.3,
   /** 화면 드래그 1px당 카메라 회전(라디안), 키보드 회전 속도(라디안/초) */
   CAMERA_DRAG_SENSITIVITY: 0.006,
   CAMERA_KEY_SPEED: 2.4,

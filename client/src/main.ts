@@ -700,7 +700,8 @@ function frame() {
     const state = c.state === "NORMAL" ? 0 : c.state === "DOWNED" ? 1 : 2;
     a.view.update(x, y, z, a.face, groundHeightAt(x, y, z), state, now < c.invulnUntil, a.info.conn === "RECONNECTING", t);
     a.view.setStatus(c.hp / MAX_HP, inGame() ? statusText(a.info, now) : "");
-    if (a === watch) world.updateCamera(x, y, z);
+    if (a === watch) a.view.nearCamera = world.updateCamera(x, y, z, dt) < CONFIG.CAMERA_FADE_RATIO;
+    else a.view.nearCamera = false;
     if (m && a.team !== m.team && c.state === "NORMAL" && now >= c.invulnUntil) enemyBuf.push(a);
   }
   if (!watch) world.updateCamera(24, 14 - 8, 0); // 입장 전: 맵 가운데를 비춤
