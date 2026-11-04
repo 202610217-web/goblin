@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ATTACK_MS, COUNTDOWN_MS, REPAIR_MS, ROUND_END_MS } from "../src/constants";
+import { ATTACK_MS, CLASS_SELECT_MS, COUNTDOWN_MS, REPAIR_MS, ROUND_END_MS } from "../src/constants";
 import { canMoveIn, canStartMatch, enterPhase, forcePhase, initialPhase, nextOnTimeout, startMatch } from "../src/phase";
 
 const P = (team: "A" | "B", ready = true, conn: "CONNECTED" | "RECONNECTING" = "CONNECTED") => ({ team, ready, conn });
@@ -18,12 +18,14 @@ describe("게임 시작 조건", () => {
 });
 
 describe("단계 전환", () => {
-  it("시작하면 1라운드 COUNTDOWN, 종료 시각 = 지금 + 10초", () => {
+  it("시작하면 1라운드 직업 선택 5초, 끝나면 COUNTDOWN 10초", () => {
     const s = startMatch(1000);
-    expect(s).toMatchObject({ phase: "COUNTDOWN", round: 1, attackingTeam: "A", phaseEndsAt: 1000 + COUNTDOWN_MS });
+    expect(s).toMatchObject({ phase: "CLASS_SELECT", round: 1, attackingTeam: "A", phaseEndsAt: 1000 + CLASS_SELECT_MS });
+    expect(CLASS_SELECT_MS).toBe(5000);
+    expect(nextOnTimeout(s, 6000)).toMatchObject({ phase: "COUNTDOWN", round: 1, phaseEndsAt: 6000 + COUNTDOWN_MS });
   });
   it("COUNTDOWN → ATTACK → ROUND_END → 다음 라운드 COUNTDOWN", () => {
-    let s = startMatch(0);
+    let s = enterPhase(startMatch(0), "COUNTDOWN", 0);
     s = nextOnTimeout(s, s.phaseEndsAt!);
     expect(s.phase).toBe("ATTACK");
     expect(s.phaseEndsAt).toBe(COUNTDOWN_MS + ATTACK_MS);

@@ -31,6 +31,8 @@ export const PING_MESSAGE = "ping";
 export const PONG_MESSAGE = "pong";
 
 // ---------- 2단계: 단계(페이즈) 시간 ----------
+/** 경기 시작 때 직업 선택(CLASS_SELECT) 시간 */
+export const CLASS_SELECT_MS = 5_000;
 /** 준비 단계(COUNTDOWN) 시간 */
 export const COUNTDOWN_MS = 10_000;
 /** 공격 단계(ATTACK) 시간 */

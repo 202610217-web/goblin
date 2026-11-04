@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assignTeam, canSwitchTeam, normalizeRoomCode, sanitizeNickname } from "../src/lobby";
+import { assignTeam, canSwitchTeam, ownerId, normalizeRoomCode, sanitizeNickname } from "../src/lobby";
 
 describe("방 코드", () => {
   it("대문자로 바꾸고 4~6자리 영문/숫자만 허용", () => {
@@ -41,5 +41,16 @@ describe("닉네임 정리", () => {
     expect(sanitizeNickname("a\u0000b\nc", "P")).toBe("abc");
     expect(sanitizeNickname("가".repeat(20), "P")).toBe("가".repeat(12));
     expect(sanitizeNickname("   ", "기본")).toBe("기본");
+  });
+});
+
+describe("방장", () => {
+  const P = (id: string, conn: "CONNECTED" | "RECONNECTING" = "CONNECTED", bot = false) => ({ id, conn, bot });
+  it("먼저 들어온 사람, 더미는 제외", () => {
+    expect(ownerId([P("b1", "CONNECTED", true), P("a"), P("b")])).toBe("a");
+    expect(ownerId([])).toBeNull();
+  });
+  it("owner passes to next: 방장이 끊기면 다음 사람", () => {
+    expect(ownerId([P("a", "RECONNECTING"), P("b")])).toBe("b");
   });
 });

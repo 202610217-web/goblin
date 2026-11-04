@@ -9,7 +9,6 @@ import {
   STATE_FLUSH_MS,
   JUMP_RATE_LIMIT_PER_SEC,
   MOVE_RATE_LIMIT_PER_SEC,
-  ATTACK_COOLDOWN_MS,
   BOT_ATTACK_COOLDOWN_MS,
   BOT_THINK_MS,
   BOT_THINK_NEAR_MS,
@@ -24,6 +23,7 @@ import {
 import { type Body, groundHeightAt, makeBody, roundBody, simulate, withAngle, withJump } from "../../shared/sim";
 import { PHYS, isNearHouse } from "../../shared/world";
 import { AIM, findAimTarget, inReach } from "../../shared/aim";
+import { CLASSES, type ClassId } from "../../shared/classes";
 import { type BotPlan, decide, msToWaypoint, planFor } from "./bots";
 import { inputTime } from "./lag";
 import {
@@ -66,7 +66,7 @@ import {
   DEFAULT_WORK_RULES,
 } from "./work";
 import { type Deadline, nextDeadlineAt, removeDeadline, splitDue, upsertDeadline } from "./deadlines";
-import { assignTeam, canSwitchTeam, sanitizeNickname } from "./lobby";
+import { assignTeam, canSwitchTeam, ownerId, sanitizeNickname } from "./lobby";
 import {
   type PhaseState,
   canMoveIn,
@@ -109,6 +109,8 @@ interface PlayerRecord {
   c: Combat;
   /** 연습용 더미면 true (소켓 없음, 서버가 움직임) */
   bot?: boolean;
+  /** 직업 (예전에 저장된 방에는 없을 수 있음 → 기사) */
+  cls?: ClassId;
   /** 더미의 이번 단계 계획 */
   plan?: BotPlan;
 }
@@ -169,6 +171,10 @@ const HOLD_REJECT_TEXT: Record<HoldRejectReason, string> = {
   busy: "치유 중에는 작업할 수 없어요",
   already_holding: "이미 작업 중이에요",
 };
+
+/** 이 플레이어의 직업 수치 */
+const cls = (p: { cls?: ClassId }) => CLASSES[p.cls ?? "KNIGHT"];
+const maxHp = (p: { cls?: ClassId }) => cls(p).maxHp;
 
 /** 팀 안 index번째 시작 위치에 선 물리 상태 */
 function spawnBody(team: Team, index: number, now: number): Body {
@@ -327,7 +333,6 @@ export class GameRoom extends DurableObject<Env> {
         st.deadlines = removeDeadline(st.deadlines, "reconnect", existing.id);
         ws.serializeAttachment({ ...(ws.deserializeAttachment() as SocketAttachment), playerId: existing.id } satisfies SocketAttachment);
         this.send(ws, this.welcome(existing, true, now, (ws.deserializeAttachment() as SocketAttachment | null)?.edge ?? "?", await (this.roomColo ?? Promise.resolve("?"))));
-        this.tryStartMatch(now);
         await this.commit();
         this.broadcastRoomState(now);
         return;
@@ -388,7 +393,6 @@ export class GameRoom extends DurableObject<Env> {
       case "set_ready":
         if (st.phase !== "LOBBY") return this.sendError(ws, "wrong_phase", "로비에서만 준비할 수 있어요");
         player.ready = msg.ready;
-        this.tryStartMatch(now);
         await this.commit();
         this.broadcastRoomState(now);
         return;
@@ -441,7 +445,7 @@ export class GameRoom extends DurableObject<Env> {
         return;
 
       case "attack": {
-        const reason = checkAttack(player.c, st.phase, this.isHolding(player.id), now);
+        const reason = checkAttack(player.c, st.phase, this.isHolding(player.id), now, cls(player).cooldownMs);
         if (reason) return this.sendError(ws, "cannot_attack", ATTACK_REJECT_TEXT[reason]!);
         const hit = this.performAttack(player, msg.yaw, msg.pitch, now);
         await this.commit();
@@ -504,7 +508,6 @@ export class GameRoom extends DurableObject<Env> {
           });
         }
         this.mustSave = true;
-        this.tryStartMatch(now); // 사람도 이미 준비했다면 바로 시작
         await this.commit();
         this.broadcastRoomState(now);
         return;
@@ -518,9 +521,20 @@ export class GameRoom extends DurableObject<Env> {
         this.broadcastRoomState(now);
         return;
 
+      case "start_game":
       case "start_practice":
         if (st.phase !== "LOBBY") return this.sendError(ws, "wrong_phase", "로비에서만 시작할 수 있어요");
-        this.startMatchNow(now, true);
+        if (ownerId(st.players) !== player.id) return this.sendError(ws, "not_owner", "방장만 시작할 수 있어요");
+        if (msg.t === "start_game" && !canStartMatch(st.players)) return this.sendError(ws, "wrong_phase", "4명이 2대2로 모두 준비해야 시작할 수 있어요");
+        this.startMatchNow(now, msg.t === "start_practice" || st.players.some((p) => p.bot));
+        await this.commit();
+        this.broadcastRoomState(now);
+        return;
+
+      case "set_class":
+        if (st.phase !== "CLASS_SELECT") return this.sendError(ws, "wrong_phase", "직업은 경기 시작 직후에만 고를 수 있어요");
+        player.cls = msg.cls;
+        this.mustSave = true;
         await this.commit();
         this.broadcastRoomState(now);
         return;
@@ -722,7 +736,7 @@ export class GameRoom extends DurableObject<Env> {
     if (!r?.c.revive || r.c.revive.endsAt > at) return;
     const target = st.players.find((x) => x.id === r.c.revive!.target);
     if (target && target.c.state === "DOWNED") {
-      target.c = completeRevive(target.c, at);
+      target.c = completeRevive(target.c, at, maxHp(target));
       st.deadlines = removeDeadline(st.deadlines, "death", target.id);
       this.refreshMotion(target, at);
     }
@@ -801,7 +815,7 @@ export class GameRoom extends DurableObject<Env> {
       if (!bot.bot || !bot.plan) continue;
       const me = seen(bot);
       const enemies = st.players.filter((p) => p.team !== bot.team).map(seen);
-      const canAttack = !checkAttack(bot.c, st.phase, this.isHolding(bot.id), now) && now - bot.c.lastAttackAt >= BOT_ATTACK_COOLDOWN_MS;
+      const canAttack = !checkAttack(bot.c, st.phase, this.isHolding(bot.id), now, cls(bot).cooldownMs) && now - bot.c.lastAttackAt >= BOT_ATTACK_COOLDOWN_MS;
       const d = decide(me, bot.plan, enemies, { phase: st.phase, attackingTeam: st.attackingTeam, holding: this.isHolding(bot.id), canAttack });
       if (d.attack) {
         const hit = this.performAttack(bot, d.attack.yaw, d.attack.pitch, now);
@@ -877,17 +891,14 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   // ---------- 단계 전환 ----------
-  /** 로비에서 시작 조건이 맞으면 게임 시작 */
-  private tryStartMatch(now: number) {
-    const st = this.state;
-    if (!st || st.phase !== "LOBBY" || !canStartMatch(st.players)) return;
-    this.startMatchNow(now, st.players.some((p) => p.bot));
-  }
-
   /** 경기 시작 (practice = 연습 경기: 인원이 모자라거나 더미가 있는 경기) */
   private startMatchNow(now: number, practice: boolean) {
     const st = this.state!;
-    for (const p of st.players) { p.c = newCombat(); p.ready = true; } // 누적 기절/사망 횟수도 0
+    for (const p of st.players) {
+      if (p.bot) p.cls = Math.random() < 0.5 ? "KNIGHT" : "ARCHER";
+      p.c = newCombat(maxHp(p)); // 누적 기절/사망 횟수도 0
+      p.ready = true;
+    }
     Object.assign(st, freshMatch());
     st.practice = practice;
     this.applyPhase(startMatch(now), now);
@@ -914,7 +925,7 @@ export class GameRoom extends DurableObject<Env> {
       st.deadlines = st.deadlines.filter((d) => d.kind !== "revive" && d.kind !== "death");
     }
     if (st.phase === "LOBBY") {
-      for (const p of st.players) { p.ready = false; p.c = newCombat(); }
+      for (const p of st.players) { p.ready = false; p.c = newCombat(maxHp(p)); }
       Object.assign(st, freshMatch());
     }
     if (enteredNewRound) {
@@ -922,7 +933,7 @@ export class GameRoom extends DurableObject<Env> {
       // 라운드 시작: 체력/상태 초기화(사망자도 부활), 팀별 시작 위치로
       for (const team of ["A", "B"] as const) {
         st.players.filter((p) => p.team === team).forEach((p, i) => {
-          p.c = resetForRound(p.c);
+          p.c = resetForRound(p.c, maxHp(p)); // 직업 선택 후 첫 라운드에서 고른 직업 체력이 적용된다
           p.body = spawnBody(team, i, now);
         });
       }
@@ -1051,6 +1062,7 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   private publicPlayers(): PublicPlayer[] {
+    const owner = ownerId(this.state?.players ?? []);
     return (this.state?.players ?? []).map((p) => ({
       id: p.id,
       nickname: p.nickname,
@@ -1068,9 +1080,11 @@ export class GameRoom extends DurableObject<Env> {
         downs: p.c.downs,
         deaths: p.c.deaths,
         revive: p.c.revive,
-        attackReadyAt: p.c.lastAttackAt + ATTACK_COOLDOWN_MS,
+        attackReadyAt: p.c.lastAttackAt + cls(p).cooldownMs,
       },
       bot: !!p.bot,
+      cls: p.cls ?? "KNIGHT",
+      owner: p.id === owner,
     }));
   }
 

@@ -1,6 +1,6 @@
 // 방 단계(페이즈) 상태 머신 (순수 함수)
 // LOBBY → COUNTDOWN → ATTACK → (REPAIR) → ROUND_END → 다음 라운드 COUNTDOWN ... → MATCH_END
-import { ATTACK_MS, COUNTDOWN_MS, FIRST_ATTACKING_TEAM, MAX_PER_TEAM, MAX_PLAYERS, REPAIR_MS, ROUND_END_MS } from "./constants";
+import { ATTACK_MS, CLASS_SELECT_MS, COUNTDOWN_MS, FIRST_ATTACKING_TEAM, MAX_PER_TEAM, MAX_PLAYERS, REPAIR_MS, ROUND_END_MS } from "./constants";
 import { countTeams } from "./lobby";
 import type { ConnState, Phase, Team } from "./protocol";
 
@@ -15,6 +15,7 @@ export interface PhaseState {
 
 /** 단계별 제한 시간. 없는 단계는 시간 제한 없음 */
 const DURATION: Partial<Record<Phase, number>> = {
+  CLASS_SELECT: CLASS_SELECT_MS,
   COUNTDOWN: COUNTDOWN_MS,
   ATTACK: ATTACK_MS,
   REPAIR: REPAIR_MS,
@@ -39,9 +40,9 @@ export function canStartMatch(players: { team: Team; conn: ConnState; ready: boo
   return players.every((p) => p.conn === "CONNECTED" && p.ready);
 }
 
-/** 게임 시작: 1라운드 준비 단계 */
+/** 게임 시작: 1라운드 직업 선택 단계 (끝나면 준비 단계) */
 export function startMatch(now: number): PhaseState {
-  return enterPhase({ ...initialPhase(), round: 1 }, "COUNTDOWN", now);
+  return enterPhase({ ...initialPhase(), round: 1 }, "CLASS_SELECT", now);
 }
 
 /**
@@ -52,6 +53,8 @@ export function startMatch(now: number): PhaseState {
  */
 export function nextOnTimeout(s: PhaseState, now: number): PhaseState {
   switch (s.phase) {
+    case "CLASS_SELECT":
+      return enterPhase(s, "COUNTDOWN", now);
     case "COUNTDOWN":
       return enterPhase(s, "ATTACK", now);
     case "ATTACK":

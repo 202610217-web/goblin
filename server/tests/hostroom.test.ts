@@ -37,7 +37,35 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     a.push({ t: "set_ready", ready: true });
     b.push({ t: "set_ready", ready: true });
     await tick(5);
-    expect(last(a, "room_state").phase).toBe("COUNTDOWN");
+    expect(last(a, "room_state").phase).toBe("LOBBY"); // 자동 시작 없음
+    a.push({ t: "start_game" });
+    await tick(5);
+    expect(last(a, "room_state").phase).toBe("CLASS_SELECT");
+    host.stop();
+  });
+
+  it("방장만 시작, 직업 선택 후 COUNTDOWN에서 직업 체력 적용 (안 고르면 기사)", async () => {
+    const host = new HostRoom("CLSS", { DEBUG_COMMANDS: "true" });
+    const a = fakePeer(), b = fakePeer();
+    host.addPeer(a, "HOST"); host.addPeer(b, "P2P");
+    await tick();
+    a.push({ t: "join", nickname: "방장" }); b.push({ t: "join", nickname: "손님" });
+    await tick(5);
+    const st = last(a, "room_state");
+    expect(st.players.map((p: any) => p.owner)).toEqual([true, false]);
+    a.push({ t: "add_bots" }); await tick(5);
+    a.push({ t: "set_ready", ready: true }); b.push({ t: "set_ready", ready: true }); await tick(5);
+    b.push({ t: "start_game" }); await tick(5);
+    expect(last(b, "error").code).toBe("not_owner");
+    a.push({ t: "start_game" }); await tick(5);
+    expect(last(a, "room_state").phase).toBe("CLASS_SELECT");
+    b.push({ t: "set_class", cls: "ARCHER" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "COUNTDOWN" }); await tick(5);
+    const ps = last(a, "room_state").players;
+    const byName = (n: string) => ps.find((p: any) => p.nickname === n);
+    expect(byName("손님")).toMatchObject({ cls: "ARCHER", combat: { hp: 70 } });
+    expect(byName("방장")).toMatchObject({ cls: "KNIGHT", combat: { hp: 150 } });
+    for (const p of ps.filter((p: any) => p.bot)) expect(p.combat.hp).toBe(p.cls === "ARCHER" ? 70 : 150);
     host.stop();
   });
 

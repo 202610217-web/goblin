@@ -5,14 +5,16 @@ export type { Body };
 import type { WorkState } from "./work";
 export type { WorkState };
 import type { Combat } from "./combat";
+import { type ClassId, isClassId } from "../../shared/classes";
+export type { ClassId };
 import type { RoundEndReason, RoundRecord, Score } from "./score";
 export type { RoundEndReason, RoundRecord, Score };
 
 export type Team = "A" | "B";
-export type Phase = "LOBBY" | "COUNTDOWN" | "ATTACK" | "REPAIR" | "ROUND_END" | "MATCH_END";
+export type Phase = "LOBBY" | "CLASS_SELECT" | "COUNTDOWN" | "ATTACK" | "REPAIR" | "ROUND_END" | "MATCH_END";
 export type ConnState = "CONNECTED" | "RECONNECTING";
 
-const PHASES: readonly Phase[] = ["LOBBY", "COUNTDOWN", "ATTACK", "REPAIR", "ROUND_END", "MATCH_END"];
+const PHASES: readonly Phase[] = ["LOBBY", "CLASS_SELECT", "COUNTDOWN", "ATTACK", "REPAIR", "ROUND_END", "MATCH_END"];
 
 // ---------- 클라이언트 → 서버 ----------
 export type ClientMessage =
@@ -39,6 +41,10 @@ export type ClientMessage =
   | { t: "remove_bots" }
   /** 로비: 인원이 모자라도 지금 있는 사람(+더미)으로 연습 경기 바로 시작 */
   | { t: "start_practice" }
+  /** 로비: 방장이 게임 시작 (4명·2대2·모두 준비일 때) → 직업 선택 5초 */
+  | { t: "start_game" }
+  /** 직업 선택 단계에서 내 직업 고르기 */
+  | { t: "set_class"; cls: ClassId }
   | { t: "debug_phase"; phase: Phase } // 개발용 강제 단계 전환 (DEBUG_COMMANDS=true 일 때만)
   | { t: "debug_teleport"; x: number; y: number } // 개발용 순간이동 (DEBUG_COMMANDS=true 일 때만)
   | { t: "debug_score"; A: number; B: number } // 개발용 점수 설정 (DEBUG_COMMANDS=true 일 때만)
@@ -62,6 +68,10 @@ export interface PublicPlayer {
   combat: PublicCombat;
   /** 연습용 더미인지 */
   bot: boolean;
+  /** 직업 */
+  cls: ClassId;
+  /** 방장인지 (게임 시작/연습 시작 가능) */
+  owner: boolean;
 }
 
 export type PublicCombat = Omit<Combat, "lastAttackAt"> & {
@@ -135,7 +145,8 @@ export type ErrorCode =
   | "debug_disabled"
   | "cannot_work"
   | "cannot_attack"
-  | "cannot_revive";
+  | "cannot_revive"
+  | "not_owner";
 
 export type ServerMessage =
   /** edge = 내가 들어온 Cloudflare 위치, roomColo = 이 방 서버가 있는 위치 (공항 코드, 핑 진단용) */
@@ -204,6 +215,10 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return { t: "remove_bots" };
     case "start_practice":
       return { t: "start_practice" };
+    case "start_game":
+      return { t: "start_game" };
+    case "set_class":
+      return isClassId(m.cls) ? { t: "set_class", cls: m.cls } : null;
     case "debug_teleport":
       if (typeof m.x !== "number" || typeof m.y !== "number" || !Number.isFinite(m.x) || !Number.isFinite(m.y)) return null;
       return { t: "debug_teleport", x: m.x, y: m.y };

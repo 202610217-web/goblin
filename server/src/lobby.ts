@@ -34,6 +34,11 @@ export function canSwitchTeam(players: { id: string; team: Team }[], playerId: s
   return countTeams(players)[target] < MAX_PER_TEAM;
 }
 
+/** 방장: 지금 연결된 사람 중 가장 먼저 들어온 사람 (더미 제외). 없으면 null */
+export function ownerId(players: { id: string; conn: string; bot?: boolean }[]): string | null {
+  return players.find((p) => !p.bot && p.conn === "CONNECTED")?.id ?? null;
+}
+
 /** 닉네임 정리: 제어문자 제거, 공백 정리, 길이 제한. 비면 fallback */
 export function sanitizeNickname(raw: string, fallback: string): string {
   const cleaned = raw
