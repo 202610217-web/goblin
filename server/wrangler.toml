@@ -28,3 +28,20 @@ ALLOW_LAN_ORIGINS = "false"
 SERVE_TEST_PAGE = "false"
 # "true"면 강제 단계 전환 같은 디버그 메시지 허용 (개발용, 배포 시 false)
 DEBUG_COMMANDS = "false"
+
+# ---------- 시험용 배포 (친구랑 먼저 해 보기) ----------
+# GitHub Actions가 `wrangler deploy --env test` 로 올린다. 주소: https://goblin-server-test.<내 계정>.workers.dev
+# (환경별 설정은 위 값을 물려받지 않으므로 바인딩과 변수를 다시 적는다)
+[env.test]
+name = "goblin-server-test"
+
+[[env.test.durable_objects.bindings]]
+name = "GAME_ROOM"
+class_name = "GameRoom"
+
+[env.test.vars]
+# GitHub Pages 주소(경로 /goblin/ 은 Origin에 포함되지 않음)만 허용
+ALLOWED_ORIGINS = "https://202610217-web.github.io"
+ALLOW_LAN_ORIGINS = "false"
+SERVE_TEST_PAGE = "false"
+DEBUG_COMMANDS = "false"

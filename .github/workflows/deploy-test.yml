@@ -1,0 +1,104 @@
+# 시험용 자동 배포: master에 올리거나 Actions 탭에서 "Run workflow"를 누르면
+# 1) 테스트 → 2) 서버를 Cloudflare에 배포 → 3) 그 서버 주소로 화면을 빌드해 GitHub Pages에 배포
+# 필요한 저장소 Secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+name: 시험용 배포
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# 같은 배포가 겹치면 먼저 것을 취소
+concurrency:
+  group: deploy-test
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 테스트
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 서버 설치 + 단위 테스트 + 타입 검사
+        working-directory: server
+        run: |
+          npm ci
+          npx vitest run
+          npx tsc --noEmit
+      - name: 화면 설치 + 타입 검사
+        working-directory: client
+        run: |
+          npm ci
+          npx tsc --noEmit
+
+  deploy-server:
+    name: 서버 배포 (Cloudflare)
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Cloudflare 비밀값 확인
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::저장소 Settings → Secrets and variables → Actions 에 CLOUDFLARE_API_TOKEN 과 CLOUDFLARE_ACCOUNT_ID 를 넣어 주세요."
+            exit 1
+          fi
+      - name: 배포
+        id: deploy
+        working-directory: server
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npm ci
+          npx wrangler deploy --env test 2>&1 | tee deploy.log
+          URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          if [ -z "$URL" ]; then
+            echo "::error::서버 주소를 찾지 못했어요. Cloudflare 대시보드에서 Workers & Pages 화면을 한 번 열어 workers.dev 주소를 만들어 주세요."
+            exit 1
+          fi
+          echo "서버 주소: $URL"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+  deploy-client:
+    name: 화면 배포 (GitHub Pages)
+    needs: deploy-server
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 빌드 (서버 주소를 wss:// 로 넣는다)
+        working-directory: client
+        env:
+          SERVER_HTTP_URL: ${{ needs.deploy-server.outputs.url }}
+        run: |
+          npm ci
+          export VITE_SERVER_URL="${SERVER_HTTP_URL/https:/wss:}"
+          echo "VITE_SERVER_URL=$VITE_SERVER_URL"
+          npx vite build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: client/dist
+      - name: Pages에 올리기
+        id: pages
+        uses: actions/deploy-pages@v4
