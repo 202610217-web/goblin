@@ -1,0 +1,19 @@
+{
+  "name": "goblin-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --ip 0.0.0.0 --port 8787 --var ALLOW_LAN_ORIGINS:true --var SERVE_TEST_PAGE:true",
+    "dev:local": "wrangler dev --port 8787 --var SERVE_TEST_PAGE:true",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261104.1",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.157.0"
+  }
+}

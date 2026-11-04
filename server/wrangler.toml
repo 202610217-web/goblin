@@ -1,0 +1,28 @@
+# Cloudflare Worker 설정 (무료 플랜 기준)
+name = "goblin-server"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# 방 1개 = Durable Object(GameRoom) 1개
+[[durable_objects.bindings]]
+name = "GAME_ROOM"
+class_name = "GameRoom"
+
+# 무료 플랜은 SQLite 방식 Durable Object만 사용 가능
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoom"]
+
+# 테스트용 HTML 페이지를 문자열로 import 하기 위한 규칙
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
+[vars]
+# 접속 허용 Origin 목록(쉼표 구분). 배포 시 GitHub Pages 주소를 추가한다.
+ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8787,http://127.0.0.1:8787"
+# "true"면 같은 와이파이의 LAN 주소(192.168.x.x 등)도 허용 (개발용, 배포 시 반드시 false)
+ALLOW_LAN_ORIGINS = "false"
+# "true"면 GET /test 에서 테스트용 HTML 페이지를 제공 (개발용)
+SERVE_TEST_PAGE = "false"

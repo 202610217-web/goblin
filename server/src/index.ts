@@ -1,0 +1,38 @@
+// Worker 진입점: /ws?room=코드 요청을 해당 방의 Durable Object로 넘긴다.
+import { normalizeRoomCode } from "./lobby";
+import { isOriginAllowed, makeOriginPolicy } from "./origin";
+import testPage from "./dev/test.html";
+
+export { GameRoom } from "./room";
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    // 개발용 테스트 페이지 (SERVE_TEST_PAGE=true 일 때만)
+    if (url.pathname === "/test" && env.SERVE_TEST_PAGE === "true") {
+      return new Response(testPage, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+
+    if (url.pathname !== "/ws") return new Response("Not found", { status: 404 });
+
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return new Response("WebSocket 연결만 가능해요", { status: 426 });
+    }
+
+    // Origin 검사: 허용 목록(+ 개발용 LAN)만 통과
+    const policy = makeOriginPolicy(env.ALLOWED_ORIGINS, env.ALLOW_LAN_ORIGINS);
+    if (!isOriginAllowed(request.headers.get("Origin"), policy)) {
+      return new Response("허용되지 않은 Origin", { status: 403 });
+    }
+
+    const room = normalizeRoomCode(url.searchParams.get("room"));
+    if (!room) return new Response("방 코드는 4~6자리 영문/숫자예요", { status: 400 });
+
+    // 방 코드 이름으로 Durable Object를 찾는다 (같은 코드 = 같은 방)
+    const stub = env.GAME_ROOM.get(env.GAME_ROOM.idFromName(room));
+    const headers = new Headers(request.headers);
+    headers.set("X-Room-Code", room);
+    return stub.fetch(new Request(request.url, { headers }));
+  },
+} satisfies ExportedHandler<Env>;
