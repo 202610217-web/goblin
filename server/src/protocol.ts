@@ -21,9 +21,9 @@ export type ClientMessage =
   | { t: "set_team"; team: Team }
   | { t: "set_ready"; ready: boolean } // 로비 준비 완료/취소
   /** 이동 방향 각도 단계 (-1=정지, 0~31, shared/sim.ts 참고). 방향이 바뀔 때만 보낸다. s = 입력 순번 */
-  | { t: "move"; a: number; s: number }
-  /** 점프 (땅에 있을 때만 서버가 허용) */
-  | { t: "jump"; s: number }
+  | { t: "move"; a: number; s: number; at?: number }
+  /** 점프 (땅에 있을 때만 서버가 허용). at = 화면에서 누른 서버 기준 시각 (지연 보정, 최대 0.5초 전까지) */
+  | { t: "jump"; s: number; at?: number }
   /** 집 작업 버튼 누름 / 뗌 (매 프레임 보내지 않고 이 2개만 보낸다) */
   | { t: "hold_start" }
   | { t: "hold_stop" }
@@ -152,6 +152,7 @@ export type ServerMessage =
   | { t: "work"; work: WorkInfo; serverTime: number }
   | { t: "error"; code: ErrorCode; message: string };
 
+const isTime = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
 const isSeq = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 1e9;
 
 /** 받은 문자열을 검증해서 ClientMessage로 바꾼다. 잘못된 값이면 null */
@@ -180,10 +181,10 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return { t: "set_ready", ready: m.ready };
     case "move":
       if (!isValidAngle(m.a) || !isSeq(m.s)) return null;
-      return { t: "move", a: m.a, s: m.s };
+      return { t: "move", a: m.a, s: m.s, at: isTime(m.at) ? m.at : undefined };
     case "jump":
       if (!isSeq(m.s)) return null;
-      return { t: "jump", s: m.s };
+      return { t: "jump", s: m.s, at: isTime(m.at) ? m.at : undefined };
     case "hold_start":
       return { t: "hold_start" };
     case "hold_stop":

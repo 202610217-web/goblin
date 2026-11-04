@@ -54,6 +54,9 @@ let seq = 0;
 let lastSentSeq = 0;
 let lastSentA = -2;
 let lastMoveSendAt = 0;
+/** 이동 의도가 마지막으로 바뀐 서버 기준 시각 (화면 예측에 쓴 시각 = 서버에 보내는 시각) */
+let prevWant = -2;
+let wantChangedAt = 0;
 /** 지금 누르고 있는 행동 (버튼을 뗄 때 같은 종류의 stop을 보낸다) */
 let activeAction: "hold" | "revive" | null = null;
 /** 행동 버튼을 누른 서버 시각 (서버 확인 전까지 진행률을 미리 채우는 데 사용) */
@@ -271,6 +274,8 @@ let prevPhase: Phase | null = null;
 let lastRoundKey = "";
 function applyRoomState(s: RoomStateMessage) {
   const prevMe = myInfo();
+  // 단계/라운드가 바뀌었거나 내 상태(기절 등)가 바뀌었으면 서버 위치를 꼭 따른다
+  const forceMe = !room || s.phase !== room.phase || s.round !== room.round;
   room = s;
   work = s.work;
   const myTeam = s.players.find((p) => p.id === myId)?.team;
@@ -295,7 +300,9 @@ function applyRoomState(s: RoomStateMessage) {
     }
     a.info = p;
     a.view.setNickname(p.id === myId ? `${p.nickname} (나)` : `${p.bot ? "🤖 " : ""}${p.nickname}`);
-    reconcile(a, p.body, p.id === myId);
+    if (p.id !== myId) reconcile(a, p.body, false);
+    else if (forceMe || p.seq >= lastSentSeq || p.combat.state !== prevMe?.combat.state) reconcile(a, p.body, true);
+    // (아직 서버에 안 간 내 입력이 있으면 덮어쓰지 않는다 — 곧 오는 move 응답으로 맞춘다)
   }
 
   // 진동: 내가 맞았을 때 / 기절했을 때
@@ -487,7 +494,7 @@ function renderHud(now: number) {
       setText("hudRole", atk ? `⚔ 공격팀 — ${enemy}팀 집을 부수세요` : `🛡 수비팀 — ${mine.team}팀 집을 지키세요`);
     }
     const bad = !net.connected || net.unstable || net.rtt > CONFIG.PING_WARN_MS;
-    setText("netStatus", net.connected ? `${bad ? "⚠ 불안정 · " : ""}ping ${Math.round(net.rtt)}ms${route ? " · " + route : ""}` : "⚠ 연결 끊김");
+    setText("netStatus", net.connected ? `${bad ? "⚠ 불안정 · " : ""}ping ${Math.round(net.rtt)}ms${route ? " · " + route : ""} · ${Math.round(fps)}fps` : "⚠ 연결 끊김");
     $("netStatus").classList.toggle("bad", bad);
   }
   // 점수, 매치포인트, 듀스, 라운드 기록
@@ -696,11 +703,22 @@ function toast(text: string) {
 // ---------- 게임 루프 ----------
 const enemyBuf: Actor[] = []; // 조준 판정용 (매 프레임 새 배열을 만들지 않는다)
 let lastFrame = performance.now();
+/** 화면 그리기 속도 (초당 프레임 수) 측정과 자동 화질 조절 */
+let fps = 60;
+let fpsCheckAt = performance.now() + 3000;
 function frame() {
   requestAnimationFrame(frame);
   const t = performance.now();
   const dt = Math.min(0.1, (t - lastFrame) / 1000);
+  if (t > lastFrame) fps += ((1000 / (t - lastFrame)) - fps) * 0.05;
   lastFrame = t;
+  // 2초마다: 느리면 해상도를 조금 낮춘다 (고해상도 패드에서 끊김 방지)
+  if (t > fpsCheckAt) {
+    fpsCheckAt = t + 2000;
+    if (fps < CONFIG.FPS_TARGET && world.pixelRatio > CONFIG.MIN_DPR && !document.hidden) {
+      world.setPixelRatio(Math.max(CONFIG.MIN_DPR, world.pixelRatio - CONFIG.DPR_STEP));
+    }
+  }
   const now = net.serverNow();
   const m = me();
 
@@ -713,8 +731,10 @@ function frame() {
   if (m && (net.connected || OFFLINE)) {
     // 1) 이동 의도 전송: 바뀔 때만, 최소 간격 유지 (서버가 이동 불가 단계에서도 의도를 기억함)
     const want = desiredAngle();
+    if (want !== prevWant) { prevWant = want; wantChangedAt = now; }
     if (want !== lastSentA && t - lastMoveSendAt >= CONFIG.MOVE_SEND_INTERVAL_MS) {
-      net.send({ t: "move", a: want, s: ++seq });
+      // at = 화면에서 방향을 바꾼 시각. 서버가 같은 시각으로 계산해서 위치가 어긋나지 않는다
+      net.send({ t: "move", a: want, s: ++seq, at: wantChangedAt });
       sentAt.set(seq, t);
       lastSentSeq = seq;
       lastSentA = want;
@@ -731,7 +751,7 @@ function frame() {
       const j = withJump(m.body, now);
       if (j) {
         m.body = j;
-        net.send({ t: "jump", s: ++seq });
+        net.send({ t: "jump", s: ++seq, at: now });
         sentAt.set(seq, t);
         lastSentSeq = seq;
       }

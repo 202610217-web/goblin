@@ -35,6 +35,14 @@ export class World3D {
     window.addEventListener("resize", () => this.resize());
   }
 
+  /** 지금 렌더링 해상도 배율 */
+  get pixelRatio(): number { return this.renderer.getPixelRatio(); }
+  /** 렌더링 해상도 배율 바꾸기 (화면이 버거우면 낮춘다) */
+  setPixelRatio(pr: number) {
+    this.renderer.setPixelRatio(pr);
+    this.resize();
+  }
+
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;

@@ -2,6 +2,10 @@
 export const CONFIG = {
   /** 렌더링 해상도 배율 상한 (성능) */
   MAX_DPR: 2,
+  /** 자동 화질 조절: 이 fps보다 낮으면 해상도 배율을 STEP만큼 낮춘다 (최소 MIN_DPR) */
+  FPS_TARGET: 45,
+  DPR_STEP: 0.25,
+  MIN_DPR: 1,
   /** 카메라 시야각(도) */
   CAMERA_FOV: 60,
   /** 3인칭 카메라 기본 내려다보는 각(라디안). 거리/높이/어깨 위치/각도 범위는 조준 판정과 같아야 해서 shared/aim.ts */

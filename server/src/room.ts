@@ -25,6 +25,7 @@ import { type Body, groundHeightAt, makeBody, roundBody, simulate, withAngle, wi
 import { PHYS, isNearHouse } from "../../shared/world";
 import { AIM, findAimTarget, inReach } from "../../shared/aim";
 import { type BotPlan, decide, msToWaypoint, planFor } from "./bots";
+import { inputTime } from "./lag";
 import {
   type RoundEndReason,
   type RoundRecord,
@@ -395,13 +396,15 @@ export class GameRoom extends DurableObject<Env> {
         player.seq = msg.s;
         // 작업/치유 중이거나 기절/사망이면 그 자리에 고정 (이동 의도만 기억했다가 풀리면 적용)
         const movable = this.canMoveNow(player);
+        // 화면에서 누른 시각 기준으로 처리 (화면 예측과 같은 계산 → 내 캐릭터가 뒤로 당겨지지 않음)
+        const at = inputTime(msg.at, player.body.t, now);
         if (msg.t === "move") {
           player.wantA = msg.a;
           // 이동 불가 단계면 정지 상태 유지 (원하는 방향만 기억)
           const a = movable ? msg.a : -1;
-          if (a !== player.body.a) player.body = roundBody(withAngle(player.body, a, now));
+          if (a !== player.body.a) player.body = roundBody(withAngle(player.body, a, at));
         } else if (movable) {
-          const jumped = withJump(player.body, now); // 공중에 있으면 null (무시)
+          const jumped = withJump(player.body, at); // 공중에 있으면 null (무시)
           if (jumped) player.body = roundBody(jumped);
         }
         this.markDirty();

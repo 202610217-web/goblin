@@ -107,3 +107,11 @@ export const BOT_THINK_NEAR_MS = 400;
 /** 상대를 쫓아가기 시작하는 거리: 지키는 더미 / 수리를 막으러 간 공격팀 더미 (집 작업하러 가는 더미는 쫓지 않음) */
 export const BOT_CHASE_RANGE_DEFENDER = 6;
 export const BOT_CHASE_RANGE_ATTACKER = 3;
+
+// ---------- 지연 보정 ----------
+/**
+ * 이동/점프 입력을 "화면에서 누른 시각"으로 처리할 때 허용하는 최대 과거 시간.
+ * 화면 예측과 서버 계산이 같은 시각을 쓰게 되어 내 캐릭터가 뒤로 당겨지지 않는다.
+ * (너무 크면 입력 시각을 속여 이득을 볼 수 있으므로 0.5초로 제한)
+ */
+export const MAX_INPUT_REWIND_MS = 500;
