@@ -29,3 +29,42 @@ export const MSG_RATE_LIMIT_PER_SEC = 10;
 /** ping 자동 응답 문자열 (클라이언트는 "ping"을 보내면 "pong"을 받는다) */
 export const PING_MESSAGE = "ping";
 export const PONG_MESSAGE = "pong";
+
+// ---------- 2단계: 단계(페이즈) 시간 ----------
+/** 준비 단계(COUNTDOWN) 시간 */
+export const COUNTDOWN_MS = 10_000;
+/** 공격 단계(ATTACK) 시간 */
+export const ATTACK_MS = 120_000;
+/** 수리 단계(REPAIR) 시간 */
+export const REPAIR_MS = 60_000;
+/** 라운드 결과 표시(ROUND_END) 시간 */
+export const ROUND_END_MS = 5_000;
+/** 1라운드 공격팀 (공수 교대 규칙은 5단계에서 추가) */
+export const FIRST_ATTACKING_TEAM = "A" as const;
+
+// ---------- 2단계: 맵 / 이동 ----------
+/** 맵 크기 (월드 좌표, 화면 가상 해상도 1280x720보다 크게 잡아 카메라가 따라다닌다) */
+export const MAP_WIDTH = 1920;
+export const MAP_HEIGHT = 1080;
+/** 캐릭터 반지름(사각형이면 반 변). 맵 경계 판정에 사용 */
+export const PLAYER_RADIUS = 24;
+/** 이동 속도 (월드 좌표/초) */
+export const PLAYER_SPEED = 260;
+
+/** 팀별 집 위치(중심)와 크기. A팀 집은 왼쪽, B팀 집은 오른쪽 */
+export const HOUSE_SIZE = 160;
+export const HOUSES = {
+  A: { x: 200, y: 540 },
+  B: { x: 1720, y: 540 },
+} as const;
+
+/** 팀별 시작 위치 (팀 안에서 0번, 1번 자리) */
+export const SPAWNS = {
+  A: [{ x: 380, y: 440 }, { x: 380, y: 640 }],
+  B: [{ x: 1540, y: 440 }, { x: 1540, y: 640 }],
+} as const;
+
+/** 연결별 이동 메시지 레이트 리밋 (초당) */
+export const MOVE_RATE_LIMIT_PER_SEC = 5;
+/** 이동 상태를 storage에 저장하는 최소 간격 (쓰기 횟수 절약) */
+export const MOVE_PERSIST_INTERVAL_MS = 1_000;

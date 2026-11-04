@@ -4,4 +4,6 @@ interface Env {
   ALLOWED_ORIGINS: string;
   ALLOW_LAN_ORIGINS: string;
   SERVE_TEST_PAGE: string;
+  /** "true"면 debug_phase 같은 개발용 메시지 허용 */
+  DEBUG_COMMANDS: string;
 }

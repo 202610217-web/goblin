@@ -26,3 +26,5 @@ ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:
 ALLOW_LAN_ORIGINS = "false"
 # "true"면 GET /test 에서 테스트용 HTML 페이지를 제공 (개발용)
 SERVE_TEST_PAGE = "false"
+# "true"면 강제 단계 전환 같은 디버그 메시지 허용 (개발용, 배포 시 false)
+DEBUG_COMMANDS = "false"

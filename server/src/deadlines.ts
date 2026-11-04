@@ -3,7 +3,7 @@
 // 가장 가까운 시각으로 알람을 다시 건다.
 // 이후 단계에서 페이즈 종료/작업 완료/사망/치유 완료 등이 kind로 추가된다.
 
-export type DeadlineKind = "reconnect";
+export type DeadlineKind = "reconnect" | "phase";
 
 export interface Deadline {
   kind: DeadlineKind;

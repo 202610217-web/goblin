@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --ip 0.0.0.0 --port 8787 --var ALLOW_LAN_ORIGINS:true --var SERVE_TEST_PAGE:true",
-    "dev:local": "wrangler dev --port 8787 --var SERVE_TEST_PAGE:true",
+    "dev": "wrangler dev --ip 0.0.0.0 --port 8787 --var ALLOW_LAN_ORIGINS:true --var SERVE_TEST_PAGE:true --var DEBUG_COMMANDS:true",
+    "dev:local": "wrangler dev --port 8787 --var SERVE_TEST_PAGE:true --var DEBUG_COMMANDS:true",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "deploy": "wrangler deploy"
