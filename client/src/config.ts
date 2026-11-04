@@ -44,6 +44,8 @@ export const CONFIG = {
   HIT_FLASH_MS: 180,
   /** 쿨다운이 끝나기 조금 전에 누른 타격은 기억했다가 끝나는 순간 보낸다 (ms) */
   ATTACK_BUFFER_MS: 300,
+  /** 행동 버튼: 서버 확인 전에 진행률을 미리 채우는 최대 시간 (ms) */
+  ACTION_PREDICT_MS: 2000,
   SWING_MS: 200,
   /** 팀 색 */
   TEAM_COLOR: { A: 0xe05555, B: 0x4f7fe0 } as const,

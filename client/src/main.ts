@@ -4,7 +4,7 @@ import { HOUSES, PHYS, SPAWNS, type TeamId, isNearHouse } from "../../shared/wor
 import { AIM, findAimTarget, inReach } from "../../shared/aim";
 // 서버와 같은 메시지 형식/규칙 수치를 그대로 쓴다 (타입은 빌드 때 지워진다)
 import type { Phase, PublicPlayer, RoomStateMessage, RoundEndReason, WorkInfo } from "../../server/src/protocol";
-import { ATTACK_COOLDOWN_MS, MAX_HP, REVIVE_TIME_MS } from "../../server/src/constants";
+import { ATTACK_COOLDOWN_MS, BREAK_TIME_MS, MAX_HP, REPAIR_TIME_MS, REVIVE_TIME_MS } from "../../server/src/constants";
 import { CONFIG } from "./config";
 import { Input } from "./input";
 import { Net } from "./net";
@@ -56,10 +56,23 @@ let lastSentA = -2;
 let lastMoveSendAt = 0;
 /** 지금 누르고 있는 행동 (버튼을 뗄 때 같은 종류의 stop을 보낸다) */
 let activeAction: "hold" | "revive" | null = null;
+/** 행동 버튼을 누른 서버 시각 (서버 확인 전까지 진행률을 미리 채우는 데 사용) */
+let actionPressedAt = 0;
+/** 서버가 거절했으면 손을 뗄 때까지 다시 시도하지 않는다 */
+let actionLatched = false;
+/** 이번에 누른 행동을 서버가 한 번이라도 확인했는지 (확인 뒤에는 서버 값만 쓴다) */
+let actionAcked = false;
+
+/** 서버 확인 전 잠깐 동안만 미리 채운다 */
+function predicting(now: number): boolean {
+  return !actionAcked && myNormal() && movable() && now - actionPressedAt < CONFIG.ACTION_PREDICT_MS;
+}
 let localAttackAt = -Infinity;
 /** 핑 측정용: 입력 순번별로 보낸 시각, 타격 보낸 시각 */
 const sentAt = new Map<number, number>();
 let attackSentAt = 0;
+/** 서버 판정 전에 미리 번쩍이게 한 상대 */
+let predictedHit: string | null = null;
 /** 핑 진단: 내가 들어온 Cloudflare 위치 → 방 서버 위치 */
 let route = "";
 /** 쿨다운 중에 누른 타격을 이 시각까지 기억 (서버 시각) */
@@ -242,6 +255,13 @@ function onServerError(code: string, message: string) {
     case "cannot_attack":
       if (!message.includes("쿨다운")) toast(message);
       break;
+    case "cannot_work":
+    case "cannot_revive":
+      // 미리 보여 주던 진행률을 되돌리고, 손을 뗄 때까지 다시 시도하지 않는다
+      activeAction = null;
+      actionLatched = true;
+      toast(message);
+      break;
     default:
       toast(message);
   }
@@ -313,7 +333,9 @@ function onSwing(by: string, target: string | null) {
   const t = performance.now();
   if (by !== myId) actors.get(by)?.view.swing(t); // 내 동작은 누르는 순간 이미 보여줬다
   else if (attackSentAt) { net.addRttSample(t - attackSentAt); attackSentAt = 0; }
-  if (target) actors.get(target)?.view.flash(t);
+  // 내가 때린 건 이미 번쩍였으면 다시 하지 않는다
+  if (target && !(by === myId && target === predictedHit)) actors.get(target)?.view.flash(t);
+  if (by === myId) predictedHit = null;
 }
 
 /** 내 이동 의도 (카메라 기준 스틱 방향 → 월드 각도 단계, 없으면 -1) */
@@ -366,10 +388,15 @@ function availableAction(): ActionKind | null {
 }
 
 function handleAction() {
+  if (actionLatched) {
+    if (!input.actionHeld) actionLatched = false;
+    return;
+  }
   if (input.actionHeld && activeAction === null) {
     const act = availableAction();
     if (act === "revive") { net.send({ t: "revive_start" }); activeAction = "revive"; }
     else if (act) { net.send({ t: "hold_start" }); activeAction = "hold"; }
+    if (act) { actionPressedAt = net.serverNow(); actionAcked = false; }
   } else if (!input.actionHeld && activeAction !== null) {
     net.send({ t: activeAction === "revive" ? "revive_stop" : "hold_stop" });
     activeAction = null;
@@ -481,7 +508,7 @@ function renderHud(now: number) {
   // 집 작업 진행률 (서버가 준 값으로 부드럽게 채움, 체크포인트 표시)
   const wb = $("workBar");
   if (work && work.kind && movable()) {
-    const p = Math.min(1, work.progress + Math.max(0, now - work.since) * work.rate);
+    const p = workProgress(now);
     wb.classList.remove("hidden");
     wb.classList.toggle("repair", work.kind === "REPAIR");
     setText("workLabel", `${work.kind === "BREAK" ? "집 부수기" : "집 수리"} ${Math.floor(p * 100)}%${work.holders.length ? " · 작업 중" : ""}`);
@@ -569,6 +596,20 @@ function renderEndScreens() {
   } else end.classList.add("hidden");
 }
 
+/**
+ * 지금 집 작업 진행률 (0~1). 서버 값으로 계산하되, 내가 방금 눌렀는데 아직 서버가 확인하지 않았으면
+ * 누른 시각부터 혼자 작업 속도로 미리 채운다 (서버 대답이 오면 서버 값으로 바뀐다).
+ */
+function workProgress(now: number): number {
+  if (!work || !work.kind) return 0;
+  const server = Math.min(1, work.progress + Math.max(0, now - work.since) * work.rate);
+  const confirmed = !!myId && work.holders.includes(myId);
+  if (confirmed) actionAcked = true;
+  if (activeAction !== "hold" || confirmed || work.holders.length > 0 || !predicting(now)) return server;
+  const ms = work.kind === "BREAK" ? BREAK_TIME_MS : REPAIR_TIME_MS;
+  return Math.min(1, work.progress + Math.max(0, now - actionPressedAt) / ms);
+}
+
 /** 오른쪽 아래 버튼들 (타격 쿨다운, 행동 라벨/진행률 링) */
 const RING = 289; // 2πr (r=46)
 function renderButtons(now: number) {
@@ -591,10 +632,13 @@ function renderButtons(now: number) {
   if (activeAction === "revive" || mine.combat.revive) {
     label = "치유 중"; cls = "revive";
     const r = mine.combat.revive;
-    if (r) progress = 1 - Math.max(0, r.endsAt - now) / REVIVE_TIME_MS;
+    // 서버 확인 전에는 누른 시각부터 미리 채운다
+    if (r) actionAcked = true;
+    progress = r ? 1 - Math.max(0, r.endsAt - now) / REVIVE_TIME_MS
+      : predicting(now) ? Math.min(1, Math.max(0, now - actionPressedAt) / REVIVE_TIME_MS) : 0;
   } else if (activeAction === "hold" || (myId && work?.holders.includes(myId))) {
     label = work?.kind === "REPAIR" ? "수리 중" : "부수는 중"; cls = "";
-    if (work) progress = Math.min(1, work.progress + Math.max(0, now - work.since) * work.rate);
+    progress = workProgress(now);
   } else {
     const act = availableAction();
     if (act === "revive") { label = "치유"; cls = "revive"; }
@@ -698,6 +742,9 @@ function frame() {
       const readyAt = Math.max(m.info.combat.attackReadyAt, localAttackAt + ATTACK_COOLDOWN_MS);
       if (movable() && myNormal() && !myBusy() && now >= readyAt) {
         net.send({ t: "attack", yaw: world.yaw, pitch: world.pitch });
+        // 서버 판정을 기다리지 않고, 조준점에 걸린 상대를 바로 번쩍이게 한다 (체력은 서버 결과로 바뀜)
+        const predicted = findAimTarget(m.body, world.yaw, world.pitch, enemyBuf);
+        if (predicted) { predicted.view.flash(t); predictedHit = predicted.id; }
         attackSentAt = t;
         localAttackAt = now;
         attackBufferedUntil = -Infinity;

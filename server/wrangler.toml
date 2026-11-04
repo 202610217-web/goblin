@@ -28,6 +28,8 @@ ALLOW_LAN_ORIGINS = "false"
 SERVE_TEST_PAGE = "false"
 # "true"면 강제 단계 전환 같은 디버그 메시지 허용 (개발용, 배포 시 false)
 DEBUG_COMMANDS = "false"
+# 방 서버를 만들 지역 (apac = 아시아·태평양). 친구들이 모두 한국에 있으므로 아시아로 고정
+ROOM_LOCATION_HINT = "apac"
 
 # ---------- 시험용 배포 (친구랑 먼저 해 보기) ----------
 # GitHub Actions가 `wrangler deploy --env test` 로 올린다. 주소: https://goblin-server-test.<내 계정>.workers.dev
@@ -45,3 +47,5 @@ ALLOWED_ORIGINS = "https://202610217-web.github.io"
 ALLOW_LAN_ORIGINS = "false"
 SERVE_TEST_PAGE = "false"
 DEBUG_COMMANDS = "false"
+# 방 서버를 만들 지역 (apac = 아시아·태평양). 친구들이 모두 한국에 있으므로 아시아로 고정
+ROOM_LOCATION_HINT = "apac"

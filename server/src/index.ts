@@ -30,7 +30,13 @@ export default {
     if (!room) return new Response("방 코드는 4~6자리 영문/숫자예요", { status: 400 });
 
     // 방 코드 이름으로 Durable Object를 찾는다 (같은 코드 = 같은 방)
-    const stub = env.GAME_ROOM.get(env.GAME_ROOM.idFromName(room));
+    // 방 서버는 처음 만들어질 때 위치가 정해진다. 위치 힌트(예: apac = 아시아·태평양)가 있으면
+    // 누가 먼저 들어오든(예: 미국 LAX로 연결되는 인터넷) 그 지역에 방을 만든다
+    const hint = env.ROOM_LOCATION_HINT?.trim();
+    const stub = env.GAME_ROOM.get(
+      env.GAME_ROOM.idFromName(room),
+      hint ? { locationHint: hint as DurableObjectLocationHint } : undefined,
+    );
     const headers = new Headers(request.headers);
     headers.set("X-Room-Code", room);
     // 접속한 사람이 들어온 Cloudflare 위치(공항 코드, 예: ICN). 핑이 높을 때 원인 확인용

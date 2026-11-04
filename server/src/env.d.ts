@@ -6,4 +6,6 @@ interface Env {
   SERVE_TEST_PAGE: string;
   /** "true"면 debug_phase 같은 개발용 메시지 허용 */
   DEBUG_COMMANDS: string;
+  /** 방 서버를 만들 지역 힌트 (예: "apac" = 아시아·태평양). 비우면 처음 접속한 사람 근처 */
+  ROOM_LOCATION_HINT?: string;
 }
