@@ -961,6 +961,8 @@ export class GameRoom extends DurableObject<Env> {
   /** 저장 안 된 변경이 생겼다고 표시. STATE_FLUSH_MS 안에 저장되도록 예정 시각을 잡는다 */
   private markDirty() {
     this.dirty = true;
+    // 호스트 기기(메모리 전용)는 저장할 곳이 없으므로 모아서 저장하는 알람을 걸지 않는다 (기기 부담 줄이기)
+    if (this.env.MEMORY_ONLY === "true") return;
     if (this.flushAt === null) this.flushAt = Date.now() + STATE_FLUSH_MS;
   }
 

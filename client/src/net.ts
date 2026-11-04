@@ -5,7 +5,7 @@
 // - "ws"  : Cloudflare 방 서버
 // 처음 들어갈 때는 "auto": 방에 호스트 기기가 있으면 p2p, 없으면 ws 로 정하고, 재접속도 같은 방식으로 한다.
 import { CONFIG } from "./config";
-import type { HostRoom } from "./host/hostRoom";
+import type { HostLike } from "./host/hostProxy";
 import { P2PGuestTransport } from "./p2p";
 import { type Transport, WsTransport, loopbackPair } from "./transport";
 
@@ -22,7 +22,7 @@ export class Net {
   private room = "";
   /** 지금 연결 방식 */
   mode: NetMode = "auto";
-  private hostRoom: HostRoom | null = null;
+  private hostRoom: HostLike | null = null;
   /** true인 동안은 끊기면 자동으로 다시 접속한다 */
   autoReconnect = false;
   /** 서버시각 - 내시각 추정값 (가장 지연이 적었던 표본 기준) */
@@ -50,7 +50,7 @@ export class Net {
   get label(): string { return this.t?.label ?? ""; }
 
   /** 이 기기를 방 서버로 쓴다 ("내 기기로 방 만들기") */
-  useHost(hostRoom: HostRoom) {
+  useHost(hostRoom: HostLike) {
     this.hostRoom = hostRoom;
     this.mode = "host";
   }
@@ -94,7 +94,8 @@ export class Net {
         return;
       }
       let delay = 0;
-      const retry = this.autoReconnect && code !== 4410; // 4410 = 호스트가 방을 닫음 → 재접속 안 함
+      // 4410 = 호스트가 방을 닫음, 4411 = 경기가 끝나서 방을 닫음 → 재접속 안 함
+      const retry = this.autoReconnect && code !== 4410 && code !== 4411;
       if (retry) {
         const d = CONFIG.RECONNECT_DELAYS_MS;
         delay = d[Math.min(this.attempt, d.length - 1)]!;

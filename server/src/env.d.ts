@@ -10,4 +10,6 @@ interface Env {
   DEBUG_COMMANDS: string;
   /** 방 서버를 만들 지역 힌트 (예: "apac" = 아시아·태평양). 비우면 처음 접속한 사람 근처 */
   ROOM_LOCATION_HINT?: string;
+  /** "true"면 저장소 없이 메모리에서만 돈다 (내 기기로 방 열기). 저장 알람을 걸지 않는다 */
+  MEMORY_ONLY?: string;
 }

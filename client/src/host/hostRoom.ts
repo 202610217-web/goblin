@@ -29,7 +29,8 @@ class VirtualSocket {
     this.attachment = v === undefined ? undefined : structuredClone(v);
   }
   deserializeAttachment(): unknown {
-    return this.attachment === undefined || this.attachment === null ? this.attachment : structuredClone(this.attachment);
+    // 서버 코드는 꺼낸 값을 고치지 않고 새로 만들어 넣으므로 복사 없이 돌려준다 (자주 불려서 부담 줄이기)
+    return this.attachment;
   }
 }
 
@@ -45,6 +46,7 @@ export class HostRoom {
   private stopped = false;
 
   constructor(readonly code: string, env: Record<string, string>) {
+    env = { MEMORY_ONLY: "true", ...env };
     const ctx = {
       setWebSocketAutoResponse: (pair: { request: string; response: string }) => { this.auto = pair; },
       blockConcurrencyWhile: (fn: () => Promise<unknown>) => this.enqueue(fn),
@@ -87,11 +89,12 @@ export class HostRoom {
     });
   }
 
-  /** 방 닫기 (호스트가 나갈 때) */
-  stop() {
+  /** 방 닫기. code 4410 = 호스트가 나감, 4411 = 경기가 끝나서 닫음 */
+  stop(code = 4410) {
+    if (this.stopped) return;
     this.stopped = true;
     if (this.alarmTimer !== null) clearTimeout(this.alarmTimer);
-    for (const ws of this.sockets) ws.close(4410, "host_closed");
+    for (const ws of this.sockets) ws.close(code, "host_closed");
   }
 
   private setAlarm(t: number | null) {

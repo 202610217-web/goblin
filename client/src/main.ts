@@ -9,7 +9,7 @@ import { CONFIG } from "./config";
 import { Input } from "./input";
 import { Net } from "./net";
 import { PlayerView, World3D } from "./world3d";
-import { HostRoom } from "./host/hostRoom";
+import { HostRoomProxy } from "./host/hostProxy";
 import { P2PHost } from "./p2p";
 import { fullscreenSupported, isStandalone, keepScreenOn, setVibration, toggleFullscreen, vibrate, vibrationEnabled } from "./device";
 
@@ -48,6 +48,9 @@ const net = new Net(SERVER_URL);
 let myId: string | null = null;
 /** "내 기기로 방 만들기"를 했을 때: 이 기기 안의 방 서버와 연결 중계 */
 let p2pHost: P2PHost | null = null;
+/** 내 기기로 연 방(또는 그 방의 손님): 경기가 끝난 뒤 방이 닫히는 시각 (performance.now 기준) */
+let matchCloseAt: number | null = null;
+let matchCloseTimer = 0;
 let roomCode = "";
 let room: RoomStateMessage | null = null;
 let work: WorkInfo | null = null;
@@ -136,7 +139,8 @@ $("hostBtn").onclick = () => {
   roomCode = code;
   stopHosting();
   net.reset();
-  const hostRoom = new HostRoom(code, { DEBUG_COMMANDS: import.meta.env.DEV ? "true" : "false" });
+  // 게임 서버는 Web Worker에서 돈다 (화면 그리기와 따로)
+  const hostRoom = new HostRoomProxy(code, { DEBUG_COMMANDS: import.meta.env.DEV ? "true" : "false" });
   p2pHost = new P2PHost(SERVER_URL, code, hostRoom);
   p2pHost.onerror = (message) => goToJoin(message);
   p2pHost.start();
@@ -152,10 +156,28 @@ function stopHosting() {
 function showJoinError(t: string) { $("joinError").textContent = t; }
 if (!fullscreenSupported() && !isStandalone()) $("a2hsHint").classList.remove("hidden");
 
+/**
+ * 내 기기로 연 방: 경기가 끝나면 결과를 잠깐 보여 준 뒤 방 서버를 끈다 (기기 자원 반납).
+ * 그 안에 누가 "다시 하기"를 눌러 로비로 돌아가면 계속한다.
+ */
+function updateMatchClose(s: RoomStateMessage) {
+  const hosted = net.mode === "host" || net.mode === "p2p";
+  if (hosted && s.phase === "MATCH_END") {
+    if (matchCloseAt !== null) return;
+    matchCloseAt = performance.now() + CONFIG.HOST_CLOSE_AFTER_MATCH_MS;
+    if (net.mode === "host") matchCloseTimer = window.setTimeout(() => p2pHost?.stop(4411), CONFIG.HOST_CLOSE_AFTER_MATCH_MS);
+  } else if (matchCloseAt !== null) {
+    matchCloseAt = null;
+    clearTimeout(matchCloseTimer);
+  }
+}
+
 /** 처음 화면으로 돌아간다 (방 가득 참, 자리 만료, 나가기 등) */
 function goToJoin(message: string) {
   net.stop();
   stopHosting();
+  matchCloseAt = null;
+  clearTimeout(matchCloseTimer);
   myId = null;
   room = null;
   work = null;
@@ -234,6 +256,7 @@ net.onOpen = () => {
 };
 net.onClose = (code, willRetry, delay) => {
   if (code === 4410) { goToJoin("호스트가 방을 닫았어요."); return; }
+  if (code === 4411) { goToJoin("경기가 끝나서 방이 닫혔어요. 다시 하려면 방을 새로 만들어 주세요."); return; }
   if (!myId && code === 4408) {
     showJoinError("호스트 기기와 직접 연결하지 못했어요. 같은 와이파이에 연결해 보거나, 다른 사람이 방을 만들어 보세요.");
     return;
@@ -361,6 +384,7 @@ function applyRoomState(s: RoomStateMessage) {
     if (s.phase === "MATCH_END" || s.phase === "LOBBY") toggleScoreboard(false);
     prevPhase = s.phase;
   }
+  updateMatchClose(s);
   renderLobby();
   renderScreens();
   renderEndScreens();
@@ -858,6 +882,13 @@ function frame() {
 
   renderHud(now);
   renderButtons(now);
+  // 경기 후 방이 닫히기까지 남은 시간
+  const note = $("matchCloseNote");
+  if (matchCloseAt !== null && room?.phase === "MATCH_END") {
+    const left = Math.max(0, Math.ceil((matchCloseAt - t) / 1000));
+    setText("matchCloseNote", `⏱ 방이 ${left}초 뒤에 닫혀요. 다시 하기를 누르면 이 방에서 계속해요.`);
+    note.classList.remove("hidden");
+  } else note.classList.add("hidden");
   renderDownOverlay(now, watch);
 }
 world.yaw = Math.PI / 2; // 입장 전 카메라는 북쪽을 바라봄

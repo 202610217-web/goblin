@@ -35,6 +35,8 @@ export const CONFIG = {
   CORRECTION_SMOOTH_MS: 120,
   /** 이 거리 이상 차이 나면 부드럽게 하지 않고 바로 이동 (m) */
   SNAP_DISTANCE: 3,
+  /** 내 기기로 연 방: 경기가 끝나고 이 시간이 지나면 방 서버를 끈다 (그 안에 다시 하기를 누르면 계속) */
+  HOST_CLOSE_AFTER_MATCH_MS: 30_000,
   /** 기기 직접 연결: 이 시간 안에 연결되지 않으면 실패로 본다 (ms) */
   P2P_CONNECT_TIMEOUT_MS: 12_000,
   /** 자동 재접속 대기 시간 (지수 백오프, 마지막 값 반복) */

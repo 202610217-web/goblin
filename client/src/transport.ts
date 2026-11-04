@@ -41,8 +41,9 @@ export function loopbackPair(): { client: Transport; server: PeerLink } {
   const server: PeerLink = {
     onmessage: () => {},
     onclose: () => {},
-    send: (text) => { if (open) setTimeout(() => client.onmessage(text), 0); },
-    close: (code = 1000) => { if (!open) return; open = false; setTimeout(() => client.onclose(code), 0); },
+    // 화면 그리기를 기다리지 않도록 바로 다음 순간(microtask)에 전달
+    send: (text) => { if (open) queueMicrotask(() => client.onmessage(text)); },
+    close: (code = 1000) => { if (!open) return; open = false; queueMicrotask(() => client.onclose(code)); },
   };
   const client: Transport = {
     onopen: () => {},
@@ -51,7 +52,7 @@ export function loopbackPair(): { client: Transport; server: PeerLink } {
     label: "내 기기(호스트)",
     get open() { return open; },
     get connecting() { return false; },
-    send: (text) => { if (open) setTimeout(() => server.onmessage(text), 0); },
+    send: (text) => { if (open) queueMicrotask(() => server.onmessage(text)); },
     close: () => { if (!open) return; open = false; setTimeout(() => server.onclose(1000), 0); },
   };
   setTimeout(() => client.onopen(), 0);

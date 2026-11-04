@@ -2,7 +2,8 @@
 // 처음 연결할 때만 Cloudflare의 연결 중계(/signal)를 써서 연결 정보(SDP, ICE 후보)를 주고받고,
 // 연결되면 게임 메시지는 기기끼리 직접 오간다 (와이파이가 미국을 거쳐도 게임은 국내로 직접).
 import { CONFIG } from "./config";
-import type { HostRoom, PeerLink } from "./host/hostRoom";
+import type { PeerLink } from "./host/hostRoom";
+import type { HostLike } from "./host/hostProxy";
 import type { Transport } from "./transport";
 
 /** 기기끼리 서로의 인터넷 주소를 알아내는 무료 STUN 서버 */
@@ -59,6 +60,9 @@ async function routeLabel(pc: RTCPeerConnection): Promise<string> {
   }
 }
 
+/** DataChannel은 닫을 때 이유(코드)를 못 보내므로, 닫기 직전에 이 표시로 시작하는 메시지로 알린다 */
+const CLOSE_PREFIX = "\u0000close:";
+
 /** DataChannel을 PeerLink 모양으로 (호스트 쪽에서 방 서버에 넘긴다) */
 function channelLink(ch: RTCDataChannel, pc: RTCPeerConnection): PeerLink {
   let closed = false;
@@ -66,7 +70,13 @@ function channelLink(ch: RTCDataChannel, pc: RTCPeerConnection): PeerLink {
     onmessage: () => {},
     onclose: () => {},
     send: (text) => { if (ch.readyState === "open") ch.send(text); },
-    close: () => { if (closed) return; closed = true; try { ch.close(); pc.close(); } catch { /* 무시 */ } },
+    close: (code = 1000) => {
+      if (closed) return;
+      closed = true;
+      try { if (ch.readyState === "open") ch.send(CLOSE_PREFIX + code); } catch { /* 무시 */ }
+      // 닫는 이유가 먼저 도착하도록 조금 뒤에 닫는다
+      setTimeout(() => { try { ch.close(); pc.close(); } catch { /* 무시 */ } }, 200);
+    },
   };
   ch.onmessage = (e) => { if (typeof e.data === "string") link.onmessage(e.data); };
   const gone = () => { if (closed) return; closed = true; try { pc.close(); } catch { /* 무시 */ } link.onclose(1006); };
@@ -86,7 +96,7 @@ export class P2PHost {
   private retry = 0;
   onerror: (message: string) => void = () => {};
 
-  constructor(private base: string, private room: string, private hostRoom: HostRoom) {}
+  constructor(private base: string, private room: string, private hostRoom: HostLike) {}
 
   start() {
     if (this.stopped) return;
@@ -99,12 +109,14 @@ export class P2PHost {
     };
   }
 
-  stop() {
+  /** 방 서버와 연결 중계를 모두 끈다. code 4410 = 호스트가 나감, 4411 = 경기가 끝나서 닫음 */
+  stop(code = 4410) {
+    if (this.stopped) return;
     this.stopped = true;
     clearTimeout(this.retry);
     this.signal?.close();
-    for (const pc of this.peers.values()) try { pc.close(); } catch { /* 무시 */ }
-    this.hostRoom.stop();
+    this.hostRoom.stop(code); // 손님들에게 닫는다고 알린 다음
+    setTimeout(() => { for (const pc of this.peers.values()) try { pc.close(); } catch { /* 무시 */ } }, 500);
   }
 
   private async onSignal(m: SignalIn) {
@@ -204,7 +216,12 @@ export class P2PGuestTransport implements Transport {
       this.label = await routeLabel(pc);
       this.onopen();
     };
-    ch.onmessage = (e) => { if (typeof e.data === "string") this.onmessage(e.data); };
+    ch.onmessage = (e) => {
+      if (typeof e.data !== "string") return;
+      // 호스트가 닫는 이유를 먼저 알려 준 경우 (예: 4411 = 경기가 끝나서 닫음)
+      if (e.data.startsWith(CLOSE_PREFIX)) { this.finish(Number(e.data.slice(CLOSE_PREFIX.length)) || 1006); return; }
+      this.onmessage(e.data);
+    };
     ch.onclose = () => this.finish(1006);
     pc.onconnectionstatechange = () => { if (pc.connectionState === "failed") this.finish(4408); };
     const offer = await pc.createOffer();
