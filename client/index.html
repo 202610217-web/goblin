@@ -6,6 +6,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#14161c" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icon-192.png" />
+  <link rel="apple-touch-icon" href="./icon-192.png" />
   <title>집 부수기 3D</title>
   <link rel="stylesheet" href="./src/style.css" />
 </head>
@@ -22,6 +27,7 @@
       <button id="joinBtn">입장</button>
     </div>
     <p id="joinError" class="error"></p>
+    <p id="a2hsHint" class="hint hidden">홈 화면에 추가하면 전체 화면으로 즐길 수 있어요 (공유 버튼 → 홈 화면에 추가)</p>
   </div>
 
   <!-- 로비 -->
@@ -31,29 +37,83 @@
       <div class="team A"><h3>A팀</h3><div id="teamA"></div><button data-team="A" class="secondary">A팀으로</button></div>
       <div class="team B"><h3>B팀</h3><div id="teamB"></div><button data-team="B" class="secondary">B팀으로</button></div>
     </div>
-    <div class="row"><button id="readyBtn">준비</button></div>
-    <p class="hint">4명이 모두 준비하면 시작해요.</p>
+    <div class="row"><button id="readyBtn">준비</button><button id="leaveBtn" class="secondary">나가기</button></div>
+    <p class="hint">4명이 모두 준비하면 시작해요. 친구에게 방 코드 <b id="lobbyRoom2"></b> 를 알려 주세요.</p>
+    <label class="check"><input type="checkbox" id="vibrateToggle" /> 맞으면 진동</label>
   </div>
 
-  <!-- 상단 HUD -->
+  <!-- 상단 HUD: 점수 · 라운드 · 남은 시간 · 집 작업 진행률 -->
   <div id="hud" class="hidden">
-    <div id="hudRound"></div>
-    <div id="hudTimer"></div>
+    <div class="scoreRow">
+      <div class="teamScore A"><span id="scoreA">0</span><small id="mpA" class="badge hidden">매치포인트</small></div>
+      <div class="center">
+        <div id="hudRound"></div>
+        <div id="hudTimer"></div>
+      </div>
+      <div class="teamScore B"><small id="mpB" class="badge hidden">매치포인트</small><span id="scoreB">0</span></div>
+    </div>
+    <div id="history"></div>
+    <div id="deuceBadge" class="badge hidden">듀스 · 2점 차가 나야 승리</div>
     <div id="hudRole"></div>
+    <div id="workBar" class="hidden">
+      <div id="workLabel"></div>
+      <div class="bar"><div id="workFill"></div><div id="workCheckpoint"></div></div>
+    </div>
   </div>
+  <button id="scoreBtn" class="small hidden">점수판</button>
+  <button id="fullscreenBtn" class="small hidden">전체 화면</button>
   <div id="netStatus"></div>
-  <div id="toast" class="hidden"></div>
+  <div id="teamPanelMine" class="teamPanel left hidden"></div>
+  <div id="teamPanelEnemy" class="teamPanel right hidden"></div>
   <div id="debug" class="hidden"></div>
 
-  <!-- 터치 조작 -->
-  <div id="touch" class="hidden">
-    <div id="stickBase"><div id="stickKnob"></div></div>
-    <div id="jumpBtn"><span>점프</span></div>
+  <!-- 점수판 (탭하면 열고 닫힘) -->
+  <div id="scoreboard" class="panel hidden">
+    <h2>점수판</h2>
+    <table>
+      <thead><tr><th>팀</th><th>닉네임</th><th>체력</th><th>기절</th><th>사망</th><th>상태</th></tr></thead>
+      <tbody id="scoreboardBody"></tbody>
+    </table>
+    <button id="scoreClose" class="secondary">닫기</button>
   </div>
 
-  <!-- 세로 화면 안내 / 연결 끊김 -->
+  <!-- 조준점 -->
+  <div id="crosshair" class="hidden"></div>
+
+  <!-- 터치 조작 (왼손 = 이동, 오른손 = 행동) -->
+  <div id="touch" class="hidden">
+    <div id="stickBase"><div id="stickKnob"></div></div>
+    <div id="buttons">
+      <div id="jumpBtn" class="gameBtn"><span>점프</span></div>
+      <div id="attackBtn" class="gameBtn"><span id="attackLabel">타격</span><div id="attackCd"></div></div>
+      <div id="actionBtn" class="gameBtn disabled">
+        <svg class="ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" /><circle id="actionRing" cx="50" cy="50" r="46" /></svg>
+        <span id="actionLabel">행동</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 기절/사망/관전 -->
+  <div id="downOverlay" class="hidden">
+    <div id="downTitle"></div>
+    <div id="downCount"></div>
+    <div id="downHint"></div>
+  </div>
+
+  <!-- 라운드 종료 / 경기 종료 -->
+  <div id="roundBanner" class="hidden"></div>
+  <div id="matchEnd" class="panel hidden">
+    <h1 id="matchTitle"></h1>
+    <div id="matchScore"></div>
+    <p id="matchSub" class="hint"></p>
+    <div class="row"><button id="rematchBtn">다시 하기</button><button id="matchScoreBtn" class="secondary">점수판</button></div>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+
+  <!-- 세로 화면 안내 / 재접속 -->
   <div id="rotate" class="cover"><div>📱↻<br />가로로 돌려주세요</div></div>
-  <div id="disconnected" class="cover hidden"><div>연결이 끊겼어요<br /><button id="reconnectBtn">다시 접속</button></div></div>
+  <div id="reconnecting" class="cover dim hidden"><div>재접속 중...<br /><small id="reconnectInfo"></small><br /><button id="giveUpBtn" class="secondary">처음 화면으로</button></div></div>
 
   <script type="module" src="./src/main.ts"></script>
 </body>

@@ -22,6 +22,20 @@ export const CONFIG = {
   CORRECTION_SMOOTH_MS: 120,
   /** 이 거리 이상 차이 나면 부드럽게 하지 않고 바로 이동 (m) */
   SNAP_DISTANCE: 3,
+  /** 자동 재접속 대기 시간 (지수 백오프, 마지막 값 반복) */
+  RECONNECT_DELAYS_MS: [1000, 2000, 4000, 8000],
+  /** 진동 패턴 (ms): 맞았을 때, 기절했을 때 */
+  VIBRATE_HIT: 40,
+  VIBRATE_DOWN: [120, 60, 120],
+  /** 라운드 종료 배너 / 안내 문구 표시 시간 */
+  TOAST_MS: 2500,
+  /** 남은 시간이 이 이하이면 타이머를 빨갛게 */
+  TIMER_URGENT_S: 10,
+  /** 맞았을 때 캐릭터가 하얗게 번쩍이는 시간, 타격 동작 시간 */
+  HIT_FLASH_MS: 180,
+  /** 쿨다운이 끝나기 조금 전에 누른 타격은 기억했다가 끝나는 순간 보낸다 (ms) */
+  ATTACK_BUFFER_MS: 300,
+  SWING_MS: 200,
   /** 팀 색 */
   TEAM_COLOR: { A: 0xe05555, B: 0x4f7fe0 } as const,
 } as const;

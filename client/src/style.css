@@ -1,7 +1,25 @@
+/* 색/크기 토큰 (게임 화면은 어두운 색감 하나로 고정) */
+:root {
+  --bg: #14161c;
+  --panel: rgba(20, 22, 28, 0.92);
+  --fg: #f2f2f2;
+  --muted: #a9adb8;
+  --accent: #e0a43a;
+  --ok: #4cc46a;
+  --bad: #ff6b6b;
+  --teamA: #e05555;
+  --teamB: #4f7fe0;
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  color-scheme: dark;
+}
+
 /* 브라우저 기본 동작(확대, 당겨서 새로고침, 길게 눌러 선택/메뉴, 스크롤) 막기 */
 html, body {
   margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
-  background: #14161c; color: #f2f2f2;
+  background: var(--bg); color: var(--fg);
   font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   overscroll-behavior: none; touch-action: none;
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
@@ -10,66 +28,117 @@ html, body {
 #stage, #stage canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .hidden { display: none !important; }
 
-/* 패널 (입장/로비) */
+/* 겹치는 순서: 3D 화면 < 이름표 < 터치 레이어 < HUD/버튼/패널 < 덮개 */
+.label { z-index: 2; }
+#touch { z-index: 5; }
+#hud, #netStatus, #teamPanelMine, #teamPanelEnemy, #crosshair, #downOverlay, #roundBanner { z-index: 6; }
+#buttons, .small, #debug { z-index: 8; }
+.panel { z-index: 20; }
+#toast { z-index: 30; }
+.cover { z-index: 50; }
+
+/* 패널 (입장/로비/점수판/경기 종료) */
 .panel {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  background: rgba(20, 22, 28, 0.92); border: 1px solid #333; border-radius: 16px;
-  padding: 20px 28px; min-width: min(560px, 90vw); max-height: 90vh; overflow: auto; text-align: center;
+  background: var(--panel); border: 1px solid #333; border-radius: 16px;
+  padding: 20px 28px; width: min(600px, calc(100vw - 32px)); box-sizing: border-box;
+  max-height: calc(100vh - 32px); overflow: auto; text-align: center; touch-action: pan-y;
 }
 .panel h1 { margin: 0 0 12px; font-size: 32px; }
 .panel h2 { margin: 0 0 12px; font-size: 26px; }
 .panel label { display: block; font-size: 20px; margin: 10px 0; }
+.panel label.check { display: flex; gap: 10px; align-items: center; justify-content: center; }
+.check input { width: 28px; height: 28px; }
 input {
-  font-size: 22px; padding: 10px 12px; width: 12em; border-radius: 10px; border: 1px solid #555;
-  background: #0d0e12; color: #fff; -webkit-user-select: text; user-select: text; touch-action: manipulation;
+  font-size: 22px; padding: 10px 12px; width: 12em; max-width: 60vw; border-radius: 10px; border: 1px solid #555;
+  background: #0d0e12; color: var(--fg); -webkit-user-select: text; user-select: text; touch-action: manipulation;
 }
 #roomInput { text-transform: uppercase; letter-spacing: 4px; }
 button {
   font-size: 20px; padding: 12px 22px; min-height: 64px; min-width: 64px; margin: 6px;
-  border-radius: 12px; border: none; background: #e0a43a; color: #111; font-weight: 700; touch-action: manipulation;
+  border-radius: 12px; border: none; background: var(--accent); color: #111; font-weight: 700; touch-action: manipulation;
 }
-button.secondary { background: #3a3f4b; color: #fff; }
-button.on { background: #4cc46a; }
+button.secondary { background: #3a3f4b; color: var(--fg); }
+button.on { background: var(--ok); }
+button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 .row { margin-top: 10px; }
-.error { color: #ff7b7b; min-height: 1.4em; font-size: 20px; }
-.hint { color: #aaa; font-size: 20px; margin: 8px 0 0; }
+.error { color: var(--bad); min-height: 1.4em; font-size: 20px; }
+.hint { color: var(--muted); font-size: 20px; margin: 8px 0 0; }
 .teams { display: flex; gap: 12px; justify-content: center; }
 .team { flex: 1; border: 2px solid #444; border-radius: 12px; padding: 8px; font-size: 20px; min-height: 140px; }
-.team.A { border-color: #e05555; } .team.B { border-color: #4f7fe0; }
+.team.A { border-color: var(--teamA); } .team.B { border-color: var(--teamB); }
 .team h3 { margin: 4px 0 8px; }
 .team .me { text-decoration: underline; font-weight: 700; }
-.team .ready { color: #4cc46a; }
+.team .ready { color: var(--ok); }
 
-/* HUD: 화면 상단 중앙 (노치 영역 피하기) */
+/* 상단 HUD: 화면 상단 중앙 */
 #hud {
-  position: fixed; top: calc(env(safe-area-inset-top) + 8px); left: 50%; transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.55); border-radius: 12px; padding: 6px 18px; text-align: center; pointer-events: none;
+  position: fixed; top: calc(var(--safe-t) + 6px); left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 2px; pointer-events: none; text-align: center;
 }
-#hudRound { font-size: 20px; color: #ccc; }
-#hudTimer { font-size: 34px; font-weight: 800; }
-#hudRole { font-size: 20px; }
+.scoreRow { display: flex; align-items: stretch; background: rgba(0, 0, 0, 0.6); border-radius: 12px; overflow: hidden; }
+.teamScore { display: flex; align-items: center; gap: 6px; padding: 0 14px; font-size: 34px; font-weight: 800; min-width: 60px; justify-content: center; }
+.teamScore.A { background: rgba(224, 85, 85, 0.55); } .teamScore.B { background: rgba(79, 127, 224, 0.55); }
+.scoreRow .center { padding: 4px 16px; min-width: 150px; }
+#hudRound { font-size: 20px; color: #ddd; white-space: nowrap; }
+#hudTimer { font-size: 32px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+#hudTimer.urgent { color: var(--bad); }
+#hudRole { font-size: 20px; background: rgba(0, 0, 0, 0.45); border-radius: 8px; padding: 2px 10px; white-space: nowrap; }
+.badge { font-size: 14px; font-weight: 800; background: var(--accent); color: #111; border-radius: 6px; padding: 2px 6px; }
+#history { display: flex; gap: 4px; min-height: 12px; }
+#history i { width: 12px; height: 12px; border-radius: 50%; display: block; border: 1px solid rgba(255, 255, 255, 0.5); }
+#history i.A { background: var(--teamA); } #history i.B { background: var(--teamB); }
+#workBar { background: rgba(0, 0, 0, 0.6); border-radius: 10px; padding: 4px 12px 8px; min-width: 260px; }
+#workLabel { font-size: 20px; font-weight: 700; }
+#workBar .bar { position: relative; height: 14px; background: #333; border-radius: 7px; overflow: hidden; }
+#workFill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); }
+#workBar.repair #workFill { background: var(--ok); }
+#workCheckpoint { position: absolute; top: -2px; bottom: -2px; width: 3px; background: #fff; }
+
+/* 점수판/전체 화면 버튼 (HUD와 겹치지 않게 오른쪽 위) */
+button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64px; padding: 6px 12px; margin: 0; opacity: 0.9; }
+#scoreBtn { top: calc(var(--safe-t) + 6px); right: calc(var(--safe-r) + 10px); }
+#fullscreenBtn { top: calc(var(--safe-t) + 56px); right: calc(var(--safe-r) + 10px); }
 #netStatus {
-  position: fixed; top: calc(env(safe-area-inset-top) + 8px); right: calc(env(safe-area-inset-right) + 10px);
+  position: fixed; bottom: calc(var(--safe-b) + 6px); left: calc(var(--safe-l) + 10px);
   font-size: 14px; color: #9a9; pointer-events: none;
 }
-#netStatus.bad { color: #ff7b7b; }
-#toast {
-  position: fixed; top: 30%; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.7);
-  padding: 10px 20px; border-radius: 12px; font-size: 22px; pointer-events: none; z-index: 40;
-}
-#debug { position: fixed; top: calc(env(safe-area-inset-top) + 4px); left: calc(env(safe-area-inset-left) + 4px); }
-#debug button { font-size: 14px; min-height: 40px; padding: 4px 8px; margin: 2px; opacity: 0.8; }
+#netStatus.bad { color: var(--bad); font-weight: 700; }
+#debug { position: fixed; bottom: calc(var(--safe-b) + 28px); left: calc(var(--safe-l) + 4px); }
+#debug button { font-size: 13px; min-height: 36px; min-width: 0; padding: 4px 6px; margin: 2px; opacity: 0.75; }
 
-/* 이름표 */
+/* 팀 체력 패널 (왼쪽 위 = 우리 팀, 오른쪽 위 = 상대 팀) */
+.teamPanel {
+  position: fixed; top: calc(var(--safe-t) + 6px); display: flex; flex-direction: column; gap: 4px;
+  pointer-events: none; font-size: 20px; width: 190px;
+}
+.teamPanel.left { left: calc(var(--safe-l) + 10px); }
+.teamPanel.right { right: calc(var(--safe-r) + 116px); }
+.tp { background: rgba(0, 0, 0, 0.5); border-radius: 8px; padding: 3px 8px; }
+.tp .nm { display: flex; justify-content: space-between; white-space: nowrap; overflow: hidden; }
+.tp .st { font-size: 14px; color: var(--muted); }
+.hpbar { height: 8px; background: #333; border-radius: 4px; overflow: hidden; }
+.hpbar div { height: 100%; width: 100%; background: var(--ok); }
+.hpbar.low div { background: var(--bad); }
+.tp.down { opacity: 0.6; }
+
+/* 이름표 + 머리 위 체력 바 */
 .label {
-  position: fixed; left: 0; top: 0; transform: translate(-50%, -100%); font-size: 20px; font-weight: 700;
+  position: fixed; left: 0; top: 0; font-size: 20px; font-weight: 700; text-align: center;
   text-shadow: 0 0 4px #000, 0 0 4px #000; pointer-events: none; white-space: nowrap; will-change: transform;
 }
+.label .hpbar { width: 70px; margin: 2px auto 0; }
+.label .tag { font-size: 20px; color: #ffd36b; }
+
+/* 조준점 */
+#crosshair { position: fixed; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; pointer-events: none; }
+#crosshair::before, #crosshair::after { content: ""; position: absolute; background: rgba(255, 255, 255, 0.9); box-shadow: 0 0 2px #000; }
+#crosshair::before { left: 12px; top: 0; width: 2px; height: 26px; }
+#crosshair::after { top: 12px; left: 0; height: 2px; width: 26px; }
+#crosshair.target::before, #crosshair.target::after { background: var(--bad); }
 
 /* 터치 조작 */
-/* 겹치는 순서: 3D 화면 < 터치 레이어 < HUD/버튼/패널 < 덮개 */
-#touch { position: fixed; inset: 0; touch-action: none; z-index: 5; }
-.panel, #hud, #debug, #netStatus { z-index: 10; }
+#touch { position: fixed; inset: 0; touch-action: none; }
 #stickBase {
   position: fixed; width: 150px; height: 150px; margin: -75px 0 0 -75px; border-radius: 50%;
   background: rgba(255, 255, 255, 0.12); border: 2px solid rgba(255, 255, 255, 0.35); display: none; pointer-events: none;
@@ -78,19 +147,90 @@ button.on { background: #4cc46a; }
   position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%;
   background: rgba(255, 255, 255, 0.55);
 }
-#jumpBtn {
-  position: fixed; right: calc(env(safe-area-inset-right) + 40px); bottom: calc(env(safe-area-inset-bottom) + 40px);
-  width: 104px; height: 104px; border-radius: 50%; background: rgba(224, 164, 58, 0.75);
-  display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 800; color: #111;
-  /* 보이는 크기보다 넉넉한 터치 영역 */
-  box-shadow: 0 0 0 24px rgba(0, 0, 0, 0.001);
+#buttons { position: fixed; right: calc(var(--safe-r) + 24px); bottom: calc(var(--safe-b) + 20px); width: 260px; height: 230px; pointer-events: none; }
+.gameBtn {
+  position: absolute; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 800; color: #111; pointer-events: auto; touch-action: none;
 }
-#jumpBtn.pressed { transform: scale(0.92); background: rgba(255, 200, 90, 0.9); }
+/* 보이는 크기보다 넉넉한 터치 영역 */
+.gameBtn::before { content: ""; position: absolute; inset: -14px; border-radius: 50%; }
+.gameBtn.pressed { transform: scale(0.93); }
+#actionBtn { right: 0; bottom: 0; width: 120px; height: 120px; background: rgba(224, 164, 58, 0.85); }
+#actionBtn.revive { background: rgba(76, 196, 106, 0.9); }
+#actionBtn.disabled { background: rgba(120, 120, 120, 0.55); color: #333; }
+#attackBtn { right: 140px; bottom: 6px; width: 96px; height: 96px; background: rgba(255, 107, 107, 0.85); overflow: hidden; }
+#attackBtn.cooling { background: rgba(120, 60, 60, 0.7); color: #ddd; }
+#attackCd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, 0.45); }
+#jumpBtn { right: 16px; bottom: 142px; width: 84px; height: 84px; background: rgba(240, 240, 240, 0.7); }
+.ring { position: absolute; inset: -8px; width: calc(100% + 16px); height: calc(100% + 16px); transform: rotate(-90deg); pointer-events: none; }
+.ring circle { fill: none; stroke-width: 6; stroke: transparent; }
+.ring #actionRing { stroke: #fff; stroke-linecap: round; stroke-dasharray: 289; stroke-dashoffset: 289; }
+#touch.spectate #buttons, #touch.spectate #stickBase { display: none; }
+
+/* 기절/사망/관전 */
+#downOverlay {
+  position: fixed; left: 50%; top: 38%; transform: translate(-50%, -50%); text-align: center;
+  pointer-events: none; text-shadow: 0 0 6px #000;
+}
+#downTitle { font-size: 30px; font-weight: 800; color: var(--bad); }
+#downCount { font-size: 72px; font-weight: 900; font-variant-numeric: tabular-nums; }
+#downHint { font-size: 20px; }
+#roundBanner {
+  position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); padding: 16px 36px; border-radius: 14px;
+  background: rgba(0, 0, 0, 0.75); font-size: 34px; font-weight: 800; text-align: center; pointer-events: none;
+}
+#roundBanner small { display: block; font-size: 20px; font-weight: 600; color: #ddd; }
+#roundBanner.A { border: 3px solid var(--teamA); } #roundBanner.B { border: 3px solid var(--teamB); }
+#matchScore { font-size: 44px; font-weight: 900; }
+
+/* 점수판 표 */
+#scoreboard table { width: 100%; border-collapse: collapse; font-size: 20px; font-variant-numeric: tabular-nums; }
+#scoreboard th, #scoreboard td { padding: 6px 4px; border-bottom: 1px solid #333; }
+#scoreboard tr.A td:first-child { color: var(--teamA); font-weight: 800; }
+#scoreboard tr.B td:first-child { color: var(--teamB); font-weight: 800; }
+#scoreboard tr.me td { background: rgba(255, 255, 255, 0.06); }
+
+#toast {
+  position: fixed; top: 32%; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.75);
+  padding: 10px 20px; border-radius: 12px; font-size: 20px; pointer-events: none; max-width: 80vw; text-align: center;
+}
 
 /* 덮개 화면 */
 .cover {
   position: fixed; inset: 0; background: rgba(10, 10, 14, 0.94); display: flex; align-items: center; justify-content: center;
-  text-align: center; font-size: 28px; z-index: 50;
+  text-align: center; font-size: 28px;
 }
+.cover.dim { background: rgba(10, 10, 14, 0.7); }
 #rotate { display: none; }
 @media (orientation: portrait) { #rotate { display: flex; } }
+
+/*
+ * 키가 작은 화면(폰 가로, 높이 ~390px)에서는 가상 해상도(1280x720) 비율대로 줄인다.
+ * 글자 최소 20px 규칙은 가상 해상도 기준이므로, 높이 390px 화면에서는 약 0.6배가 맞다.
+ */
+@media (max-height: 520px) {
+  #hud { transform: translateX(-50%) scale(0.62); transform-origin: top center; }
+  .teamPanel.left { transform: scale(0.7); transform-origin: top left; }
+  .teamPanel.right { transform: scale(0.7); transform-origin: top right; right: calc(var(--safe-r) + 84px); }
+  button.small { transform: scale(0.75); transform-origin: top right; }
+  #fullscreenBtn { top: calc(var(--safe-t) + 44px); }
+  #buttons { transform: scale(0.72); transform-origin: right bottom; right: calc(var(--safe-r) + 12px); bottom: calc(var(--safe-b) + 10px); }
+  #stickBase { transform: scale(0.8); }
+  #downOverlay, #roundBanner { transform: translate(-50%, -50%) scale(0.7); }
+  .label { font-size: 14px; }
+  .label .tag { font-size: 14px; }
+  .label .hpbar { width: 50px; }
+  /* 패널: 화면 안에 다 들어오게 */
+  .panel { padding: 10px 16px; }
+  .panel h1 { font-size: 24px; margin-bottom: 4px; }
+  .panel h2 { font-size: 20px; margin-bottom: 6px; }
+  .panel label { margin: 4px 0; font-size: 18px; }
+  .team { min-height: 0; padding: 4px; font-size: 18px; }
+  .team h3 { margin: 0 0 4px; }
+  button { min-height: 48px; padding: 8px 16px; font-size: 18px; margin: 4px; }
+  .hint { font-size: 16px; margin-top: 4px; }
+  #scoreboard table { font-size: 16px; }
+  #scoreboard th, #scoreboard td { padding: 3px; }
+  #matchScore { font-size: 32px; }
+}
+@media (prefers-reduced-motion: reduce) { .gameBtn.pressed { transform: none; } }
