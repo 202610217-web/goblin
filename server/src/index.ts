@@ -33,6 +33,8 @@ export default {
     const stub = env.GAME_ROOM.get(env.GAME_ROOM.idFromName(room));
     const headers = new Headers(request.headers);
     headers.set("X-Room-Code", room);
+    // 접속한 사람이 들어온 Cloudflare 위치(공항 코드, 예: ICN). 핑이 높을 때 원인 확인용
+    headers.set("X-Edge-Colo", String((request as { cf?: { colo?: string } }).cf?.colo ?? "?"));
     return stub.fetch(new Request(request.url, { headers }));
   },
 } satisfies ExportedHandler<Env>;

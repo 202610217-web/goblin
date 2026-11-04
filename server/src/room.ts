@@ -133,6 +133,8 @@ interface RoomState extends PhaseState {
 /** 소켓마다 붙여두는 정보 (Hibernation 후에도 유지됨) */
 interface SocketAttachment {
   playerId: string | null;
+  /** 이 소켓이 들어온 Cloudflare 위치 (핑 진단용) */
+  edge?: string;
 }
 
 /** 1초 창 레이트 리밋 카운터 */
@@ -264,7 +266,8 @@ export class GameRoom extends DurableObject<Env> {
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server); // ws.accept()는 쓰지 않는다 (Hibernation)
     this.stats.connects++;
-    server.serializeAttachment({ playerId: null } satisfies SocketAttachment);
+    server.serializeAttachment({ playerId: null, edge: request.headers.get("X-Edge-Colo") ?? "?" } satisfies SocketAttachment);
+    if (this.roomColo === null) this.roomColo = this.findRoomColo(); // 이 방 서버 위치는 한 번만 알아낸다
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -312,8 +315,8 @@ export class GameRoom extends DurableObject<Env> {
         existing.conn = "CONNECTED";
         existing.reconnectDeadline = null;
         st.deadlines = removeDeadline(st.deadlines, "reconnect", existing.id);
-        ws.serializeAttachment({ playerId: existing.id } satisfies SocketAttachment);
-        this.send(ws, this.welcome(existing, true, now));
+        ws.serializeAttachment({ ...(ws.deserializeAttachment() as SocketAttachment), playerId: existing.id } satisfies SocketAttachment);
+        this.send(ws, this.welcome(existing, true, now, (ws.deserializeAttachment() as SocketAttachment | null)?.edge ?? "?", await (this.roomColo ?? Promise.resolve("?"))));
         this.tryStartMatch(now);
         await this.commit();
         this.broadcastRoomState(now);
@@ -346,9 +349,9 @@ export class GameRoom extends DurableObject<Env> {
       c: newCombat(),
     };
     st.players.push(player);
-    ws.serializeAttachment({ playerId: player.id } satisfies SocketAttachment);
+    ws.serializeAttachment({ ...(ws.deserializeAttachment() as SocketAttachment), playerId: player.id } satisfies SocketAttachment);
     await this.save();
-    this.send(ws, this.welcome(player, false, now));
+    this.send(ws, this.welcome(player, false, now, (ws.deserializeAttachment() as SocketAttachment | null)?.edge ?? "?", await (this.roomColo ?? Promise.resolve("?"))));
     this.broadcastRoomState(now);
   }
 
@@ -1015,8 +1018,20 @@ export class GameRoom extends DurableObject<Env> {
     });
   }
 
-  private welcome(p: PlayerRecord, resumed: boolean, now: number): ServerMessage {
-    return { t: "welcome", playerId: p.id, token: p.token, room: this.state!.code, resumed, serverTime: now };
+  private welcome(p: PlayerRecord, resumed: boolean, now: number, edge: string, roomColo: string): ServerMessage {
+    return { t: "welcome", playerId: p.id, token: p.token, room: this.state!.code, resumed, serverTime: now, edge, roomColo };
+  }
+
+  /** 이 Durable Object가 실행 중인 Cloudflare 위치 (cdn-cgi/trace의 colo=). 실패하면 "?" */
+  private roomColo: Promise<string> | null = null;
+  private async findRoomColo(): Promise<string> {
+    try {
+      // 0.8초 안에 답이 없으면 포기 (입장이 늦어지지 않게)
+      const text = await (await fetch("https://www.cloudflare.com/cdn-cgi/trace", { signal: AbortSignal.timeout(800) })).text();
+      return /colo=(\w+)/.exec(text)?.[1] ?? "?";
+    } catch {
+      return "?";
+    }
   }
 
   private publicPlayers(): PublicPlayer[] {

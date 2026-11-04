@@ -138,7 +138,8 @@ export type ErrorCode =
   | "cannot_revive";
 
 export type ServerMessage =
-  | { t: "welcome"; playerId: string; token: string; room: string; resumed: boolean; serverTime: number }
+  /** edge = 내가 들어온 Cloudflare 위치, roomColo = 이 방 서버가 있는 위치 (공항 코드, 핑 진단용) */
+  | { t: "welcome"; playerId: string; token: string; room: string; resumed: boolean; serverTime: number; edge: string; roomColo: string }
   | RoomStateMessage
   /** 한 플레이어의 이동 입력이 처리되었을 때 (body.t 시각의 물리 상태, s = 처리한 입력 순번) */
   | { t: "move"; id: string; body: Body; s: number }

@@ -15,7 +15,18 @@ export class Net {
   autoReconnect = false;
   /** 서버시각 - 내시각 추정값 (가장 지연이 적었던 표본 기준) */
   private offset = -Infinity;
-  rtt = 0;
+  /** 최근 왕복 시간(ms) 표본. 화면에는 중간값을 보여 준다 (한 번 튄 값에 흔들리지 않게) */
+  private samples: number[] = [];
+  get rtt(): number {
+    if (this.samples.length === 0) return 0;
+    const sorted = [...this.samples].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)]!;
+  }
+  /** 왕복 시간 표본 추가 (ping 응답, 내 입력에 대한 서버 응답) */
+  addRttSample(ms: number) {
+    this.samples.push(ms);
+    if (this.samples.length > CONFIG.RTT_SAMPLES) this.samples.shift();
+  }
   onMessage: Handler = () => {};
   onOpen: () => void = () => {};
   /** willRetry = 자동 재접속을 예약했는지, delay = 다음 시도까지(ms) */
@@ -31,6 +42,7 @@ export class Net {
     this.ws = ws;
     ws.onopen = () => {
       this.attempt = 0;
+      this.samples = []; // 새 연결은 새로 잰다
       this.lastPongAt = performance.now();
       this.onOpen();
       this.ping();
@@ -38,7 +50,7 @@ export class Net {
     };
     ws.onmessage = (e) => {
       if (e.data === "pong") {
-        this.rtt = performance.now() - this.pingSentAt;
+        this.addRttSample(performance.now() - this.pingSentAt);
         this.lastPongAt = performance.now();
         return;
       }

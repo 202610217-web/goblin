@@ -23,6 +23,8 @@ export const CONFIG = {
   MOVE_SEND_INTERVAL_MS: 200,
   /** ping 간격 (20초 이하) */
   PING_INTERVAL_MS: 15_000,
+  /** 핑 표시에 쓰는 최근 표본 수 (중간값) */
+  RTT_SAMPLES: 8,
   /** 이 이상 ping 지연이면 경고 표시 */
   PING_WARN_MS: 250,
   /** 서버 보정 오차를 부드럽게 줄이는 시간 상수 (ms) */

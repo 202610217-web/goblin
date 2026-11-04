@@ -57,6 +57,11 @@ let lastMoveSendAt = 0;
 /** 지금 누르고 있는 행동 (버튼을 뗄 때 같은 종류의 stop을 보낸다) */
 let activeAction: "hold" | "revive" | null = null;
 let localAttackAt = -Infinity;
+/** 핑 측정용: 입력 순번별로 보낸 시각, 타격 보낸 시각 */
+const sentAt = new Map<number, number>();
+let attackSentAt = 0;
+/** 핑 진단: 내가 들어온 Cloudflare 위치 → 방 서버 위치 */
+let route = "";
 /** 쿨다운 중에 누른 타격을 이 시각까지 기억 (서버 시각) */
 let attackBufferedUntil = -Infinity;
 
@@ -185,6 +190,7 @@ net.onMessage = (m) => {
   switch (m.t) {
     case "welcome":
       myId = m.playerId;
+      route = m.edge && m.roomColo ? `${m.edge}→${m.roomColo}` : "";
       try { sessionStorage.setItem(tokenKey(), m.token); } catch { /* 무시 */ }
       net.autoReconnect = true; // 이제부터 끊기면 자동 재접속
       lastSentA = -2; // 접속 직후 현재 입력을 다시 보낸다
@@ -293,6 +299,12 @@ function applyRoomState(s: RoomStateMessage) {
 function onMove(id: string, body: Body, s: number) {
   const a = actors.get(id);
   if (!a) return;
+  if (id === myId) {
+    // 내 입력이 서버에서 처리되어 돌아온 시간 = 왕복 시간 표본
+    const t0 = sentAt.get(s);
+    if (t0 !== undefined) net.addRttSample(performance.now() - t0);
+    for (const k of sentAt.keys()) if (k <= s) sentAt.delete(k);
+  }
   if (id === myId && s < lastSentSeq) return; // 더 새 입력이 아직 서버로 가는 중이면 보정하지 않는다
   reconcile(a, body, id === myId);
 }
@@ -300,6 +312,7 @@ function onMove(id: string, body: Body, s: number) {
 function onSwing(by: string, target: string | null) {
   const t = performance.now();
   if (by !== myId) actors.get(by)?.view.swing(t); // 내 동작은 누르는 순간 이미 보여줬다
+  else if (attackSentAt) { net.addRttSample(t - attackSentAt); attackSentAt = 0; }
   if (target) actors.get(target)?.view.flash(t);
 }
 
@@ -447,7 +460,7 @@ function renderHud(now: number) {
       setText("hudRole", atk ? `⚔ 공격팀 — ${enemy}팀 집을 부수세요` : `🛡 수비팀 — ${mine.team}팀 집을 지키세요`);
     }
     const bad = !net.connected || net.unstable || net.rtt > CONFIG.PING_WARN_MS;
-    setText("netStatus", net.connected ? `${bad ? "⚠ 불안정 · " : ""}ping ${Math.round(net.rtt)}ms` : "⚠ 연결 끊김");
+    setText("netStatus", net.connected ? `${bad ? "⚠ 불안정 · " : ""}ping ${Math.round(net.rtt)}ms${route ? " · " + route : ""}` : "⚠ 연결 끊김");
     $("netStatus").classList.toggle("bad", bad);
   }
   // 점수, 매치포인트, 듀스, 라운드 기록
@@ -658,6 +671,7 @@ function frame() {
     const want = desiredAngle();
     if (want !== lastSentA && t - lastMoveSendAt >= CONFIG.MOVE_SEND_INTERVAL_MS) {
       net.send({ t: "move", a: want, s: ++seq });
+      sentAt.set(seq, t);
       lastSentSeq = seq;
       lastSentA = want;
       lastMoveSendAt = t;
@@ -674,6 +688,7 @@ function frame() {
       if (j) {
         m.body = j;
         net.send({ t: "jump", s: ++seq });
+        sentAt.set(seq, t);
         lastSentSeq = seq;
       }
     }
@@ -683,6 +698,7 @@ function frame() {
       const readyAt = Math.max(m.info.combat.attackReadyAt, localAttackAt + ATTACK_COOLDOWN_MS);
       if (movable() && myNormal() && !myBusy() && now >= readyAt) {
         net.send({ t: "attack", yaw: world.yaw, pitch: world.pitch });
+        attackSentAt = t;
         localAttackAt = now;
         attackBufferedUntil = -Infinity;
         m.view.swing(t);
