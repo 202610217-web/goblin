@@ -4,25 +4,21 @@
 // - 메모리는 Hibernation 때 사라질 수 있으므로 방 상태는 storage에 저장한다.
 import { DurableObject } from "cloudflare:workers";
 import {
-  HOUSES,
-  HOUSE_SIZE,
-  MAP_HEIGHT,
-  MAP_WIDTH,
   MAX_MESSAGE_BYTES,
   MAX_SOCKETS_PER_ROOM,
   MOVE_PERSIST_INTERVAL_MS,
+  JUMP_RATE_LIMIT_PER_SEC,
   MOVE_RATE_LIMIT_PER_SEC,
   MSG_RATE_LIMIT_PER_SEC,
   PING_MESSAGE,
-  PLAYER_RADIUS,
-  PLAYER_SPEED,
   PONG_MESSAGE,
   RECONNECT_GRACE_MS,
   SESSION_TOKEN_BYTES,
+  SPAWNS,
 } from "./constants";
+import { type Body, makeBody, roundBody, withAngle, withJump } from "../../shared/sim";
 import { type Deadline, nextDeadlineAt, removeDeadline, splitDue, upsertDeadline } from "./deadlines";
 import { assignTeam, canSwitchTeam, sanitizeNickname } from "./lobby";
-import { type MoveState, setDirection, spawnPosition, stop } from "./movement";
 import {
   type PhaseState,
   canMoveIn,
@@ -36,7 +32,6 @@ import {
   type ClientMessage,
   type ConnState,
   type ErrorCode,
-  type MapInfo,
   type PublicPlayer,
   type ServerMessage,
   type Team,
@@ -52,9 +47,12 @@ interface PlayerRecord {
   conn: ConnState;
   reconnectDeadline: number | null;
   ready: boolean;
-  move: MoveState;
-  /** 클라이언트가 마지막으로 원한 방향. 이동 불가 단계에서 받은 입력도 기억해 두었다가 이동 가능해지면 적용 */
-  wantDir: number;
+  /** 물리 상태 (마지막 이벤트 시각 기준. 현재 위치는 simulate로 계산) */
+  body: Body;
+  /** 클라이언트가 마지막으로 원한 이동 각도. 이동 불가 단계에서 받은 입력도 기억했다가 이동 가능해지면 적용 */
+  wantA: number;
+  /** 마지막으로 처리한 입력 순번 (클라이언트 예측 보정용) */
+  seq: number;
 }
 
 /** storage에 저장되는 방 상태 */
@@ -77,14 +75,17 @@ interface RateWindow {
 
 const STATE_KEY = "room";
 
-const MAP_INFO: MapInfo = {
-  width: MAP_WIDTH,
-  height: MAP_HEIGHT,
-  playerRadius: PLAYER_RADIUS,
-  playerSpeed: PLAYER_SPEED,
-  houseSize: HOUSE_SIZE,
-  houses: { A: { ...HOUSES.A }, B: { ...HOUSES.B } },
-};
+/** 팀 안 index번째 시작 위치에 선 물리 상태 */
+function spawnBody(team: Team, index: number, now: number): Body {
+  const list = SPAWNS[team];
+  const p = list[Math.min(index, list.length - 1)]!;
+  return makeBody(p.x, p.y, now);
+}
+
+/** 지금 시각에 그 자리에 멈춘 상태 */
+function stopped(b: Body, now: number): Body {
+  return roundBody(withAngle(b, -1, now));
+}
 
 /** 추측 불가능한 랜덤 hex 문자열 */
 function randomHex(bytes: number): string {
@@ -121,6 +122,7 @@ export class GameRoom extends DurableObject<Env> {
   /** 연결별 레이트 리밋 (메모리 전용. Hibernation으로 사라져도 문제 없음) */
   private rate = new Map<WebSocket, RateWindow>();
   private moveRate = new Map<WebSocket, RateWindow>();
+  private jumpRate = new Map<WebSocket, RateWindow>();
   /** 이동 상태가 아직 storage에 저장되지 않았는지 */
   private movesDirty = false;
   private lastSaveAt = 0;
@@ -209,7 +211,6 @@ export class GameRoom extends DurableObject<Env> {
     const team = assignTeam(st.players);
     if (!team) return this.reject(ws, "room_full", "방이 가득 찼어요 (최대 4명)");
 
-    const spawn = spawnPosition(team, st.players.filter((p) => p.team === team).length);
     const player: PlayerRecord = {
       id: randomHex(6),
       token: randomHex(SESSION_TOKEN_BYTES),
@@ -218,8 +219,9 @@ export class GameRoom extends DurableObject<Env> {
       conn: "CONNECTED",
       reconnectDeadline: null,
       ready: false,
-      move: { ...spawn, dir: 0, moveAt: now },
-      wantDir: 0,
+      body: spawnBody(team, st.players.filter((p) => p.team === team).length, now),
+      wantA: -1,
+      seq: 0,
     };
     st.players.push(player);
     ws.serializeAttachment({ playerId: player.id } satisfies SocketAttachment);
@@ -256,17 +258,28 @@ export class GameRoom extends DurableObject<Env> {
         this.broadcastRoomState(now);
         return;
 
-      case "move": {
-        // 이동은 연결별로 초당 MOVE_RATE_LIMIT_PER_SEC 회까지만
-        if (!allowInWindow(this.moveRate, ws, MOVE_RATE_LIMIT_PER_SEC, now)) {
+      case "move":
+      case "jump": {
+        // 이동은 초당 MOVE_RATE_LIMIT_PER_SEC, 점프는 초당 JUMP_RATE_LIMIT_PER_SEC 회까지만 (연결별)
+        const limited = msg.t === "move"
+          ? !allowInWindow(this.moveRate, ws, MOVE_RATE_LIMIT_PER_SEC, now)
+          : !allowInWindow(this.jumpRate, ws, JUMP_RATE_LIMIT_PER_SEC, now);
+        if (limited) {
           return this.sendError(ws, "rate_limited", "이동 메시지가 너무 많아요");
         }
-        player.wantDir = msg.dir;
-        // 이동 가능한 단계가 아니면 정지 상태 유지 (원하는 방향만 기억)
-        const dir = canMoveIn(st.phase) ? msg.dir : 0;
-        if (dir === player.move.dir) return; // 방향이 그대로면 아무것도 안 함
-        player.move = setDirection(player.move, dir, now);
+        player.seq = msg.s;
+        const movable = canMoveIn(st.phase);
+        if (msg.t === "move") {
+          player.wantA = msg.a;
+          // 이동 불가 단계면 정지 상태 유지 (원하는 방향만 기억)
+          const a = movable ? msg.a : -1;
+          if (a !== player.body.a) player.body = roundBody(withAngle(player.body, a, now));
+        } else if (movable) {
+          const jumped = withJump(player.body, now); // 공중에 있으면 null (무시)
+          if (jumped) player.body = roundBody(jumped);
+        }
         this.movesDirty = true;
+        // 바뀐 게 없어도 응답(순번 확인)은 보낸다. 서버→클라이언트 메시지는 요청 수에 포함되지 않는다
         this.broadcastMove(player);
         return;
       }
@@ -304,6 +317,7 @@ export class GameRoom extends DurableObject<Env> {
   private async onSocketGone(ws: WebSocket) {
     this.rate.delete(ws);
     this.moveRate.delete(ws);
+    this.jumpRate.delete(ws);
     const now = Date.now();
     const att = ws.deserializeAttachment() as SocketAttachment | null;
     const st = await this.load();
@@ -311,8 +325,8 @@ export class GameRoom extends DurableObject<Env> {
     if (player && player.conn === "CONNECTED" && this.socketsOf(player.id, ws).length === 0) {
       player.conn = "RECONNECTING";
       player.reconnectDeadline = now + RECONNECT_GRACE_MS;
-      player.move = stop(player.move, now); // 재접속 대기 중에는 정지
-      player.wantDir = 0;
+      player.body = stopped(player.body, now); // 재접속 대기 중에는 정지
+      player.wantA = -1;
       st.deadlines = upsertDeadline(st.deadlines, { kind: "reconnect", key: player.id, at: player.reconnectDeadline });
       await this.saveAndSchedule();
       this.broadcastRoomState(now);
@@ -383,14 +397,14 @@ export class GameRoom extends DurableObject<Env> {
       // 라운드 시작: 모두 팀별 시작 위치로
       for (const team of ["A", "B"] as const) {
         st.players.filter((p) => p.team === team).forEach((p, i) => {
-          p.move = { ...spawnPosition(team, i), dir: 0, moveAt: now };
+          p.body = spawnBody(team, i, now);
         });
       }
     } else if (!canMoveIn(st.phase)) {
-      for (const p of st.players) p.move = stop(p.move, now);
+      for (const p of st.players) p.body = stopped(p.body, now);
     } else if (becameMovable) {
       // 이동 가능해지는 순간: 준비 단계 동안 누르고 있던 방향으로 바로 출발
-      for (const p of st.players) if (p.conn === "CONNECTED") p.move = setDirection(p.move, p.wantDir, now);
+      for (const p of st.players) if (p.conn === "CONNECTED") p.body = roundBody(withAngle(p.body, p.wantA, now));
     }
     if (st.phase === "LOBBY") for (const p of st.players) p.ready = false;
 
@@ -465,7 +479,7 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   private welcome(p: PlayerRecord, resumed: boolean, now: number): ServerMessage {
-    return { t: "welcome", playerId: p.id, token: p.token, room: this.state!.code, resumed, map: MAP_INFO, serverTime: now };
+    return { t: "welcome", playerId: p.id, token: p.token, room: this.state!.code, resumed, serverTime: now };
   }
 
   private publicPlayers(): PublicPlayer[] {
@@ -476,10 +490,8 @@ export class GameRoom extends DurableObject<Env> {
       conn: p.conn,
       reconnectDeadline: p.reconnectDeadline,
       ready: p.ready,
-      x: p.move.x,
-      y: p.move.y,
-      dir: p.move.dir,
-      moveAt: p.move.moveAt,
+      body: p.body,
+      seq: p.seq,
     }));
   }
 
@@ -499,9 +511,9 @@ export class GameRoom extends DurableObject<Env> {
     });
   }
 
-  /** 방향이 바뀐 플레이어 1명의 이동 정보만 전송 (클라이언트가 이후 위치를 직접 계산) */
+  /** 입력이 처리된 플레이어 1명의 물리 상태만 전송 (클라이언트가 이후 위치를 직접 계산) */
   private broadcastMove(p: PlayerRecord) {
-    this.broadcast({ t: "move", id: p.id, x: p.move.x, y: p.move.y, dir: p.move.dir, at: p.move.moveAt });
+    this.broadcast({ t: "move", id: p.id, body: p.body, s: p.seq });
   }
 
   private broadcast(msg: ServerMessage) {

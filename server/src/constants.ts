@@ -42,29 +42,14 @@ export const ROUND_END_MS = 5_000;
 /** 1라운드 공격팀 (공수 교대 규칙은 5단계에서 추가) */
 export const FIRST_ATTACKING_TEAM = "A" as const;
 
-// ---------- 2단계: 맵 / 이동 ----------
-/** 맵 크기 (월드 좌표, 화면 가상 해상도 1280x720보다 크게 잡아 카메라가 따라다닌다) */
-export const MAP_WIDTH = 1920;
-export const MAP_HEIGHT = 1080;
-/** 캐릭터 반지름(사각형이면 반 변). 맵 경계 판정에 사용 */
-export const PLAYER_RADIUS = 24;
-/** 이동 속도 (월드 좌표/초) */
-export const PLAYER_SPEED = 260;
+// ---------- 이동 ----------
+// 맵 구조와 이동 물리 수치(속도, 중력, 점프, 계단 높이 등)는 클라이언트와 똑같이 써야 하므로
+// shared/world.ts 에 있다. 여기서는 그대로 다시 내보낸다.
+export { PHYS, HOUSES, SPAWNS, BOXES } from "../../shared/world";
 
-/** 팀별 집 위치(중심)와 크기. A팀 집은 왼쪽, B팀 집은 오른쪽 */
-export const HOUSE_SIZE = 160;
-export const HOUSES = {
-  A: { x: 200, y: 540 },
-  B: { x: 1720, y: 540 },
-} as const;
-
-/** 팀별 시작 위치 (팀 안에서 0번, 1번 자리) */
-export const SPAWNS = {
-  A: [{ x: 380, y: 440 }, { x: 380, y: 640 }],
-  B: [{ x: 1540, y: 440 }, { x: 1540, y: 640 }],
-} as const;
-
-/** 연결별 이동 메시지 레이트 리밋 (초당) */
+/** 연결별 이동 메시지(move) 레이트 리밋 (초당) */
 export const MOVE_RATE_LIMIT_PER_SEC = 5;
+/** 연결별 점프 메시지(jump) 레이트 리밋 (초당). 땅에 있을 때만 점프되므로 실제로는 더 적다 */
+export const JUMP_RATE_LIMIT_PER_SEC = 3;
 /** 이동 상태를 storage에 저장하는 최소 간격 (쓰기 횟수 절약) */
 export const MOVE_PERSIST_INTERVAL_MS = 1_000;

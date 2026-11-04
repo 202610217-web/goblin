@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <!-- 확대/축소 막기 + 노치 영역까지 사용 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#14161c" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>집 부수기 3D</title>
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <div id="stage"></div>
+
+  <!-- 입장 화면 -->
+  <div id="join" class="panel">
+    <h1>집 부수기 3D</h1>
+    <label>방 코드 <input id="roomInput" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD" /></label>
+    <label>닉네임 <input id="nickInput" maxlength="12" autocomplete="off" placeholder="닉네임" /></label>
+    <div class="row">
+      <button id="randomRoom" class="secondary">새 방 코드</button>
+      <button id="joinBtn">입장</button>
+    </div>
+    <p id="joinError" class="error"></p>
+  </div>
+
+  <!-- 로비 -->
+  <div id="lobby" class="panel hidden">
+    <h2>방 <span id="lobbyRoom"></span></h2>
+    <div class="teams">
+      <div class="team A"><h3>A팀</h3><div id="teamA"></div><button data-team="A" class="secondary">A팀으로</button></div>
+      <div class="team B"><h3>B팀</h3><div id="teamB"></div><button data-team="B" class="secondary">B팀으로</button></div>
+    </div>
+    <div class="row"><button id="readyBtn">준비</button></div>
+    <p class="hint">4명이 모두 준비하면 시작해요.</p>
+  </div>
+
+  <!-- 상단 HUD -->
+  <div id="hud" class="hidden">
+    <div id="hudRound"></div>
+    <div id="hudTimer"></div>
+    <div id="hudRole"></div>
+  </div>
+  <div id="netStatus"></div>
+  <div id="toast" class="hidden"></div>
+  <div id="debug" class="hidden"></div>
+
+  <!-- 터치 조작 -->
+  <div id="touch" class="hidden">
+    <div id="stickBase"><div id="stickKnob"></div></div>
+    <div id="jumpBtn"><span>점프</span></div>
+  </div>
+
+  <!-- 세로 화면 안내 / 연결 끊김 -->
+  <div id="rotate" class="cover"><div>📱↻<br />가로로 돌려주세요</div></div>
+  <div id="disconnected" class="cover hidden"><div>연결이 끊겼어요<br /><button id="reconnectBtn">다시 접속</button></div></div>
+
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

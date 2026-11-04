@@ -1,5 +1,7 @@
 // 클라이언트 <-> 서버 WebSocket 메시지 형식 (JSON)
 // 모든 메시지는 { t: "종류", ... } 모양이다.
+import { type Body, isValidAngle } from "../../shared/sim";
+export type { Body };
 
 export type Team = "A" | "B";
 export type Phase = "LOBBY" | "COUNTDOWN" | "ATTACK" | "REPAIR" | "ROUND_END" | "MATCH_END";
@@ -13,7 +15,10 @@ export type ClientMessage =
   | { t: "set_nickname"; nickname: string }
   | { t: "set_team"; team: Team }
   | { t: "set_ready"; ready: boolean } // 로비 준비 완료/취소
-  | { t: "move"; dir: number } // 0=정지, 1~8 = 8방향 (movement.ts 참고). 방향이 바뀔 때만 보낸다
+  /** 이동 방향 각도 단계 (-1=정지, 0~31, shared/sim.ts 참고). 방향이 바뀔 때만 보낸다. s = 입력 순번 */
+  | { t: "move"; a: number; s: number }
+  /** 점프 (땅에 있을 때만 서버가 허용) */
+  | { t: "jump"; s: number }
   | { t: "debug_phase"; phase: Phase } // 개발용 강제 단계 전환 (DEBUG_COMMANDS=true 일 때만)
   | { t: "leave" }; // 완전히 나가기 (재접속 대기 없이 즉시 퇴장)
 
@@ -26,11 +31,10 @@ export interface PublicPlayer {
   /** 재접속 대기 마감 시각 (서버 기준 ms 타임스탬프), 연결 중이면 null */
   reconnectDeadline: number | null;
   ready: boolean;
-  /** 이동 상태: moveAt 시각에 (x, y)에 있었고 dir 방향으로 움직이는 중 */
-  x: number;
-  y: number;
-  dir: number;
-  moveAt: number;
+  /** 물리 상태 (body.t 시각 기준). 클라이언트는 shared/sim.ts의 simulate로 현재 위치를 계산 */
+  body: Body;
+  /** 서버가 마지막으로 처리한 이 플레이어의 입력 순번 */
+  seq: number;
 }
 
 export interface RoomStateMessage {
@@ -43,16 +47,6 @@ export interface RoomStateMessage {
   phaseEndsAt: number | null;
   players: PublicPlayer[];
   serverTime: number;
-}
-
-/** 클라이언트가 맵을 그리고 이동을 예측하는 데 필요한 정보 */
-export interface MapInfo {
-  width: number;
-  height: number;
-  playerRadius: number;
-  playerSpeed: number;
-  houseSize: number;
-  houses: Record<Team, { x: number; y: number }>;
 }
 
 export type ErrorCode =
@@ -68,12 +62,14 @@ export type ErrorCode =
   | "debug_disabled";
 
 export type ServerMessage =
-  | { t: "welcome"; playerId: string; token: string; room: string; resumed: boolean; map: MapInfo; serverTime: number }
+  | { t: "welcome"; playerId: string; token: string; room: string; resumed: boolean; serverTime: number }
   | RoomStateMessage
-  /** 한 플레이어의 방향이 바뀌었을 때 (at 시각에 x,y 에서 dir 방향으로 이동 시작) */
-  | { t: "move"; id: string; x: number; y: number; dir: number; at: number }
+  /** 한 플레이어의 이동 입력이 처리되었을 때 (body.t 시각의 물리 상태, s = 처리한 입력 순번) */
+  | { t: "move"; id: string; body: Body; s: number }
   | { t: "notice"; code: "player_left_game"; message: string }
   | { t: "error"; code: ErrorCode; message: string };
+
+const isSeq = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 1e9;
 
 /** 받은 문자열을 검증해서 ClientMessage로 바꾼다. 잘못된 값이면 null */
 export function parseClientMessage(raw: string): ClientMessage | null {
@@ -100,8 +96,11 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       if (typeof m.ready !== "boolean") return null;
       return { t: "set_ready", ready: m.ready };
     case "move":
-      if (typeof m.dir !== "number" || !Number.isInteger(m.dir) || m.dir < 0 || m.dir > 8) return null;
-      return { t: "move", dir: m.dir };
+      if (!isValidAngle(m.a) || !isSeq(m.s)) return null;
+      return { t: "move", a: m.a, s: m.s };
+    case "jump":
+      if (!isSeq(m.s)) return null;
+      return { t: "jump", s: m.s };
     case "debug_phase":
       if (!PHASES.includes(m.phase as Phase)) return null;
       return { t: "debug_phase", phase: m.phase as Phase };
