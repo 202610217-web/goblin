@@ -6,6 +6,7 @@ import type { WorkState } from "./work";
 export type { WorkState };
 import type { Combat } from "./combat";
 import { type ClassId, isClassId } from "../../shared/classes";
+import type { Vec3 } from "../../shared/aim";
 export type { ClassId };
 import type { RoundEndReason, RoundRecord, Score } from "./score";
 export type { RoundEndReason, RoundRecord, Score };
@@ -159,6 +160,8 @@ export type ServerMessage =
   | { t: "debug_stats"; stats: UsageStats }
   /** 누군가 타격했을 때 (target = 맞은 사람, 빗나가면 null). 체력 변화는 함께 오는 room_state로 반영 */
   | { t: "swing"; by: string; target: string | null; serverTime: number }
+  /** 궁수가 쐈을 때 (화면이 같은 화살을 그림). at = 쏜 서버 시각. 맞으면 swing(target)이 따로 온다 */
+  | { t: "shot"; by: string; origin: Vec3; dir: Vec3; at: number }
   /** 집 작업 상태가 바뀌었을 때 (시작/중단/완료)만 보낸다 */
   | { t: "work"; work: WorkInfo; serverTime: number }
   | { t: "error"; code: ErrorCode; message: string };

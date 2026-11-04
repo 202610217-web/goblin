@@ -43,12 +43,22 @@ describe("더미 길 찾기 (벽/단상에 막히지 않는지)", () => {
 });
 
 describe("더미 행동 결정", () => {
-  const ctx = { phase: "ATTACK" as const, attackingTeam: "A" as const, holding: false, canAttack: true };
+  const ctx = { phase: "ATTACK" as const, attackingTeam: "A" as const, holding: false, canAttack: true, ranged: false };
   const me = (x: number, y: number, team: "A" | "B" = "B") => ({ id: "bot", team, body: makeBody(x, y, 0), c: newCombat() });
   it("사거리 안 상대가 있으면 때린다", () => {
     const d = decide(me(10, 2), planFor("B", "ATTACK", "A", 0), [{ ...me(11.5, 2, "A"), id: "h" }], ctx);
     expect(d.attack).toBeDefined();
     expect(d.angle).toBe(-1);
+  });
+  it("궁수 더미는 8m 거리 적을 쏘고, 기사 더미는 쏘지 않는다", () => {
+    const foe = [{ ...me(18, 2, "A"), id: "h" }]; // y=2 줄 x 10~22는 빈 곳
+    expect(decide(me(10, 2), planFor("B", "ATTACK", "A", 0), foe, { ...ctx, ranged: true }).attack).toBeDefined();
+    expect(decide(me(10, 2), planFor("B", "ATTACK", "A", 0), foe, ctx).attack).toBeUndefined();
+  });
+  it("궁수 더미는 벽 뒤 적은 쏘지 않는다", () => {
+    // x=17 벽(y 12~16) 뒤
+    const d = decide(me(12, 14), planFor("B", "ATTACK", "A", 0), [{ ...me(20, 14, "A"), id: "h" }], { ...ctx, ranged: true });
+    expect(d.attack).toBeUndefined();
   });
   it("쿨다운 중이면 때리지 않는다", () => {
     const d = decide(me(10, 2), planFor("B", "ATTACK", "A", 0), [{ ...me(11.5, 2, "A"), id: "h" }], { ...ctx, canAttack: false });
@@ -85,7 +95,7 @@ describe("더미 행동 결정", () => {
 });
 
 describe("더미 우선순위", () => {
-  const ctx = { phase: "ATTACK" as const, attackingTeam: "A" as const, holding: false, canAttack: true };
+  const ctx = { phase: "ATTACK" as const, attackingTeam: "A" as const, holding: false, canAttack: true, ranged: false };
   it("공격 더미는 집 앞에 도착하면 옆에 적이 있어도 부수기부터", () => {
     const plan = planFor("A", "ATTACK", "A", 0);
     plan.idx = plan.waypoints.length - 1;
@@ -106,7 +116,7 @@ describe("더미 우선순위", () => {
 
 describe("작업하러 가는 더미", () => {
   it("길 가다 사거리 안에 적이 있어도 싸우지 않고 계속 간다", () => {
-    const ctx = { phase: "ATTACK" as const, attackingTeam: "A" as const, holding: false, canAttack: true };
+    const ctx = { phase: "ATTACK" as const, attackingTeam: "A" as const, holding: false, canAttack: true, ranged: false };
     const plan = planFor("A", "ATTACK", "A", 0);
     const bot = { id: "b", team: "A" as const, body: makeBody(11, 11, 0), c: newCombat() };
     const e = { id: "e", team: "B" as const, body: makeBody(11, 10, 0), c: newCombat() };

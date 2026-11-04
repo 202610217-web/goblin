@@ -23,7 +23,8 @@ import {
 import { type Body, groundHeightAt, makeBody, roundBody, simulate, withAngle, withJump } from "../../shared/sim";
 import { PHYS, isNearHouse } from "../../shared/world";
 import { AIM, findAimTarget, inReach } from "../../shared/aim";
-import { CLASSES, type ClassId } from "../../shared/classes";
+import { ARROW, CLASSES, type ClassId } from "../../shared/classes";
+import { arrowSegmentHit, makeArrow } from "../../shared/arrow";
 import { type BotPlan, decide, msToWaypoint, planFor } from "./bots";
 import { inputTime } from "./lag";
 import {
@@ -44,6 +45,7 @@ import {
   checkAttack,
   checkReviveStart,
   completeRevive,
+  isCombatPhase,
   isHittable,
   newCombat,
   resetForRound,
@@ -757,19 +759,52 @@ export class GameRoom extends DurableObject<Env> {
     const st = this.state!;
     player.c = { ...player.c, lastAttackAt: now };
     const me = simulate(player.body, now);
+    if (cls(player).ranged) {
+      this.fireArrow(player, me, yaw, pitch, now);
+      return null; // 맞았는지는 화살이 날아간 뒤 판정
+    }
     const candidates = st.players
       .filter((p) => p.team !== player.team && isHittable(p.c, now))
       .map((p) => ({ id: p.id, body: simulate(p.body, now), p }));
     const hit = findAimTarget(me, yaw, pitch, candidates);
-    if (hit) {
-      const r = resolveHit(hit.p.c, hit.p.id, st.work, now); // 맞아도 작업 유지, 기절하면 작업 중단
-      hit.p.c = r.c;
-      st.work = r.work;
-      if (hit.p.c.state === "DOWNED") this.onDowned(hit.p, now);
-    }
-    this.broadcast({ t: "swing", by: player.id, target: hit?.id ?? null, serverTime: now });
-    this.checkWipe(now);
+    this.landHit(player.id, hit?.p ?? null, now);
     return hit?.p ?? null;
+  }
+
+  /** 맞은 뒤 처리 (근접/화살 공통): 체력, 기절, swing 방송, 전멸 확인 */
+  private landHit(by: string, target: PlayerRecord | null, now: number) {
+    const st = this.state!;
+    if (target) {
+      const r = resolveHit(target.c, target.id, st.work, now); // 맞아도 작업 유지, 기절하면 작업 중단
+      target.c = r.c;
+      st.work = r.work;
+      if (target.c.state === "DOWNED") this.onDowned(target, now);
+    }
+    this.broadcast({ t: "swing", by, target: target?.id ?? null, serverTime: now });
+    this.checkWipe(now);
+  }
+
+  /** 화살: 쏜 걸 알리고 50ms마다 지나간 구간을 판정. 메모리 타이머만 쓰고 저장하지 않는다 (0.4초면 끝남) */
+  private fireArrow(shooter: PlayerRecord, me: Body, yaw: number, pitch: number, now: number) {
+    const arrow = makeArrow(me, yaw, pitch, now);
+    this.broadcast({ t: "shot", by: shooter.id, ...arrow });
+    let from = now;
+    const step = async () => {
+      const st = this.state;
+      if (!st || !isCombatPhase(st.phase)) return; // 라운드가 끝났으면 화살은 버린다
+      const to = Math.max(from, Date.now());
+      const r = arrowSegmentHit(arrow, from, to, st.players.filter((p) => p.team !== shooter.team && isHittable(p.c, to)));
+      if (r.hit) {
+        this.landHit(shooter.id, r.hit, to);
+        await this.commit();
+        this.broadcastRoomState(to);
+        this.broadcastWork(to); // 기절로 작업이 멈췄을 수 있음
+      } else if (!r.stopped) {
+        from = to;
+        setTimeout(step, ARROW.STEP_MS);
+      }
+    };
+    setTimeout(step, ARROW.STEP_MS);
   }
 
   /** 집 작업 시작. 안 되면 이유를 돌려준다 */
@@ -816,7 +851,7 @@ export class GameRoom extends DurableObject<Env> {
       const me = seen(bot);
       const enemies = st.players.filter((p) => p.team !== bot.team).map(seen);
       const canAttack = !checkAttack(bot.c, st.phase, this.isHolding(bot.id), now, cls(bot).cooldownMs) && now - bot.c.lastAttackAt >= BOT_ATTACK_COOLDOWN_MS;
-      const d = decide(me, bot.plan, enemies, { phase: st.phase, attackingTeam: st.attackingTeam, holding: this.isHolding(bot.id), canAttack });
+      const d = decide(me, bot.plan, enemies, { phase: st.phase, attackingTeam: st.attackingTeam, holding: this.isHolding(bot.id), canAttack, ranged: cls(bot).ranged });
       if (d.attack) {
         const hit = this.performAttack(bot, d.attack.yaw, d.attack.pitch, now);
         changed = true;

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { HostRoom, type PeerLink } from "../../client/src/host/hostRoom";
+import { makeArrow } from "../../shared/arrow";
+import { makeBody } from "../../shared/sim";
 
 /** 화면 한 개 흉내: 받은 메시지를 모아 두는 통로 */
 function fakePeer(): PeerLink & { got: any[]; raw: string[]; closed: number | null; push(o: unknown): void } {
@@ -66,6 +68,32 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     expect(byName("손님")).toMatchObject({ cls: "ARCHER", combat: { hp: 70 } });
     expect(byName("방장")).toMatchObject({ cls: "KNIGHT", combat: { hp: 150 } });
     for (const p of ps.filter((p: any) => p.bot)) expect(p.combat.hp).toBe(p.cls === "ARCHER" ? 70 : 150);
+    host.stop();
+  });
+
+  it("궁수 화살: 쏘면 shot 방송, 가만히 있는 적은 날아간 뒤 맞는다", async () => {
+    const host = new HostRoom("ARRW", { DEBUG_COMMANDS: "true" });
+    const a = fakePeer(), b = fakePeer();
+    host.addPeer(a, "HOST"); host.addPeer(b, "P2P");
+    await tick();
+    a.push({ t: "join", nickname: "기사" }); b.push({ t: "join", nickname: "궁수" });
+    await tick(5);
+    a.push({ t: "start_practice" }); await tick(5);
+    b.push({ t: "set_class", cls: "ARCHER" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "COUNTDOWN" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "ATTACK" }); await tick(5);
+    // y=2 줄은 x 10~22가 빈 곳. 궁수는 (10,2)에서 동쪽으로, 적은 화살 길 위 7m 앞에 세운다
+    b.push({ t: "debug_teleport", x: 10, y: 2 }); await tick(5);
+    const arrow = makeArrow(makeBody(10, 2, 0), 0, 0.1, 0);
+    a.push({ t: "debug_teleport", x: 10 + arrow.dir.x * 7, y: 2 + arrow.dir.y * 7 }); await tick(5);
+    const aId = last(a, "welcome").playerId;
+    const hp0 = last(a, "room_state").players.find((p: any) => p.id === aId).combat.hp;
+    b.push({ t: "attack", yaw: 0, pitch: 0.1 }); await tick(5);
+    expect(last(a, "shot")).toMatchObject({ by: last(b, "welcome").playerId });
+    expect(last(a, "swing")).toBeUndefined(); // 아직 날아가는 중
+    await tick(400);
+    expect(last(a, "swing")).toMatchObject({ target: aId });
+    expect(last(a, "room_state").players.find((p: any) => p.id === aId).combat.hp).toBe(hp0 - 25);
     host.stop();
   });
 

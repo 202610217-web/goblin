@@ -2,7 +2,9 @@
 // 서버가 알람으로 가끔(0.4~1초) 깨어나 더미마다 "어디로 갈지, 때릴지, 작업할지"만 정한다.
 // 이동 자체는 사람과 같은 물리(shared/sim.ts)로 계산된다.
 import { AIM, findAimTarget, inReach } from "../../shared/aim";
-import { type Body, radToAngle } from "../../shared/sim";
+import { ARROW } from "../../shared/classes";
+import { arrowSegmentHit, makeArrow } from "../../shared/arrow";
+import { type Body, radToAngle, withAngle } from "../../shared/sim";
 import { isNearHouse } from "../../shared/world";
 import { BOT_CHASE_RANGE_ATTACKER, BOT_CHASE_RANGE_DEFENDER } from "./constants";
 import type { Combat } from "./combat";
@@ -83,6 +85,25 @@ const ARRIVE = 0.5;
 const angleTo = (from: Point, to: Point) => radToAngle(Math.atan2(to.y - from.y, to.x - from.x));
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
 
+/** 궁수 더미가 쏘는 범위 (사거리 12m보다 조금 짧게) */
+export const BOT_ARCHER_RANGE = 10;
+const ARCHER_PITCH = 0.1;
+
+/** 궁수 더미: 지금 자리의 target을 화살이 맞히는 조준 (벽에 가리면 null). 리드 없이 현재 위치를 노린다 */
+function archerAim(bot: Body, target: Body): { yaw: number; pitch: number } | null {
+  const want = Math.atan2(target.y - bot.y, target.x - bot.x);
+  let yaw = want;
+  // 어깨 카메라라서 화살 방향이 조준 방향과 조금 다르다 → 몇 번 돌려 맞춘다
+  for (let i = 0; i < 3; i++) {
+    const d = makeArrow(bot, yaw, ARCHER_PITCH, 0).dir;
+    yaw += want - Math.atan2(d.y, d.x);
+  }
+  const arrow = makeArrow(bot, yaw, ARCHER_PITCH, bot.t);
+  const still = { id: "t", body: withAngle(target, -1, bot.t) };
+  const r = arrowSegmentHit(arrow, bot.t, bot.t + (ARROW.MAX_RANGE / ARROW.SPEED) * 1000, [still]);
+  return r.hit ? { yaw, pitch: ARCHER_PITCH } : null;
+}
+
 /**
  * 더미 한 명의 이번 행동.
  * 우선순위: 기절/사망이면 정지 → 작업 중이면 계속 → (집 앞이면 작업 시작)
@@ -92,7 +113,7 @@ export function decide(
   bot: BotSeen,
   plan: BotPlan,
   enemies: BotSeen[],
-  ctx: { phase: Phase; attackingTeam: Team; holding: boolean; canAttack: boolean },
+  ctx: { phase: Phase; attackingTeam: Team; holding: boolean; canAttack: boolean; ranged: boolean },
 ): BotDecision {
   if (bot.c.state !== "NORMAL") return { angle: -1, enemyNear: false };
   const attacker = bot.team === ctx.attackingTeam;
@@ -119,6 +140,11 @@ export function decide(
     if (myTurn && isNearHouse(house, bot.body.x, bot.body.y, bot.body.z)) return { angle: -1, holdStart: true, enemyNear };
   }
 
+  // 궁수 더미: 10m 안 적이 보이면 그 자리에서 쏜다
+  if (ctx.ranged && ctx.canAttack && !plan.hold && target && best <= BOT_ARCHER_RANGE) {
+    const aim = archerAim(bot.body, target.body);
+    if (aim) return { angle: -1, attack: aim, enemyNear };
+  }
   // 집 작업하러 가는 더미는 싸우지 않고 끝까지 가서 작업만 한다 (사람이 지켜 주거나 막아야 한다)
   if (!plan.hold && target && inReach(bot.body, target.body, AIM.ATTACK_RANGE * 0.9, AIM.ATTACK_MAX_HEIGHT_DIFF)) {
     const yaw = Math.atan2(target.body.y - bot.body.y, target.body.x - bot.body.x);
