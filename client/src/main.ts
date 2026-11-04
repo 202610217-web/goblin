@@ -1,6 +1,6 @@
 // 3D 시험판 진입점: 입장 → 로비 → 게임 화면(이동/점프/카메라)
-import { type Body, angleToRad, groundHeightAt, radToAngle, simulate, withAngle, withJump } from "../../shared/sim";
-import type { TeamId } from "../../shared/world";
+import { type Body, angleToRad, groundHeightAt, makeBody, radToAngle, simulate, withAngle, withJump } from "../../shared/sim";
+import { SPAWNS, type TeamId } from "../../shared/world";
 import { CONFIG } from "./config";
 import { Input } from "./input";
 import { Net } from "./net";
@@ -10,6 +10,12 @@ import { PlayerView, World3D } from "./world3d";
 // .env의 VITE_SERVER_URL, 없으면 지금 접속한 주소의 8787 포트 (같은 와이파이 패드 테스트용)
 const SERVER_URL: string =
   import.meta.env.VITE_SERVER_URL || `${location.protocol === "https:" ? "wss" : "ws"}://${location.hostname}:8787`;
+
+/**
+ * 혼자 연습 모드: 서버 없이 같은 물리 코드(shared/sim.ts)를 브라우저에서만 돌려 조작감을 확인한다.
+ * 빌드 시 VITE_OFFLINE=1 이거나 주소에 ?offline 이 있으면 켜진다.
+ */
+const OFFLINE = import.meta.env.VITE_OFFLINE === "1" || new URLSearchParams(location.search).has("offline");
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -87,7 +93,7 @@ $("readyBtn").onclick = () => {
 $("reconnectBtn").onclick = () => { $("disconnected").classList.add("hidden"); net.connect(roomCode); };
 
 // 개발 모드: 강제 단계 전환 버튼 (서버 DEBUG_COMMANDS=true 필요)
-if (import.meta.env.DEV) {
+if (import.meta.env.DEV && !OFFLINE) {
   const dbg = $("debug");
   dbg.classList.remove("hidden");
   for (const ph of ["LOBBY", "COUNTDOWN", "ATTACK", "REPAIR", "ROUND_END"]) {
@@ -226,6 +232,13 @@ const PHASE_NAME: Record<Phase, string> = {
 };
 function renderHud(now: number) {
   if (!room || room.phase === "LOBBY") return;
+  if (OFFLINE) {
+    setText("hudRound", "혼자 연습 모드");
+    setText("hudTimer", "자유 이동");
+    setText("hudRole", "왼쪽: 이동 · 오른쪽 드래그: 카메라 · 점프 버튼");
+    setText("netStatus", "서버 없음 (연습)");
+    return;
+  }
   const left = room.phaseEndsAt === null ? 0 : Math.max(0, Math.ceil((room.phaseEndsAt - now) / 1000));
   const mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, "0");
   setText("hudRound", `라운드 ${room.round} · ${PHASE_NAME[room.phase]}`);
@@ -276,7 +289,7 @@ function frame() {
   world.pitch += cam.pitch;
 
   const me = myId ? actors.get(myId) : undefined;
-  if (me && net.connected) {
+  if (me && (net.connected || OFFLINE)) {
     // 1) 이동 의도 전송: 바뀔 때만, 최소 간격 유지 (서버가 이동 불가 단계에서도 의도를 기억함)
     const want = desiredAngle();
     if (want !== lastSentA && t - lastMoveSendAt >= CONFIG.MOVE_SEND_INTERVAL_MS) {
@@ -320,6 +333,18 @@ function frame() {
   renderHud(now);
 }
 world.yaw = Math.PI / 2; // 입장 전 카메라는 북쪽을 바라봄
+
+// 혼자 연습 모드: 입장 화면 없이 A팀 시작 위치에서 바로 움직일 수 있는 상태로 시작
+if (OFFLINE) {
+  myId = "me";
+  world.yaw = 0; // 동쪽(상대 팀 집 방향)을 바라보며 시작
+  $("join").classList.add("hidden");
+  const sp = SPAWNS.A[0]!;
+  applyRoomState({
+    room: "연습", phase: "ATTACK", round: 1, attackingTeam: "A", phaseEndsAt: null,
+    players: [{ id: "me", nickname: "연습", team: "A", conn: "CONNECTED", ready: true, body: makeBody(sp.x, sp.y, net.serverNow()), seq: 0 }],
+  });
+}
 requestAnimationFrame(frame);
 
 // 개발 모드에서만: 자동 테스트/디버깅용으로 상태 노출
