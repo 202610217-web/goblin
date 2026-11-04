@@ -91,7 +91,13 @@ export function findAimTarget<T extends { id: string; body: Body }>(attacker: Bo
   for (const c of candidates) {
     const b = c.body;
     if (!inReach(attacker, b, AIM.ATTACK_RANGE, AIM.ATTACK_MAX_HEIGHT_DIFF)) continue;
-    if ((b.x - attacker.x) * fx + (b.y - attacker.y) * fy <= 0) continue; // 등 뒤
+    const ahead = (b.x - attacker.x) * fx + (b.y - attacker.y) * fy;
+    if (ahead <= 0) continue; // 등 뒤
+    // 몸이 겹칠 만큼 붙어 있으면(캐릭터끼리는 통과 가능) 조준선과 상관없이 맞는다
+    if (Math.hypot(b.x - attacker.x, b.y - attacker.y) < H * 2 && ahead >= 0.1) {
+      if (bestT > 0) { best = c; bestT = 0; }
+      continue;
+    }
     const t = rayAabb(origin, dir, { x: b.x - H, y: b.y - H, z: b.z }, { x: b.x + H, y: b.y + H, z: b.z + PHYS.PLAYER_HEIGHT });
     if (t === null || t < tStart || t >= bestT) continue;
     if (blocked(origin, dir, tStart, t)) continue;

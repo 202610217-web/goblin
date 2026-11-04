@@ -64,6 +64,8 @@ button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 .row { margin-top: 10px; }
 .error { color: var(--bad); min-height: 1.4em; font-size: 20px; }
 .hint { color: var(--muted); font-size: 20px; margin: 8px 0 0; }
+.hint.small { font-size: 16px; }
+.row.practice { border-top: 1px solid #333; padding-top: 8px; }
 .teams { display: flex; gap: 12px; justify-content: center; }
 .team { flex: 1; border: 2px solid #444; border-radius: 12px; padding: 8px; font-size: 20px; min-height: 140px; }
 .team.A { border-color: var(--teamA); } .team.B { border-color: var(--teamB); }

@@ -97,3 +97,13 @@ export const WIN_SCORE = 6;
 export const DEUCE_LEAD = 2;
 /** true면 듀스 동안 매 라운드 공수 교대 */
 export const DEUCE_SWAP_EVERY_ROUND = true;
+
+// ---------- 연습용 더미 ----------
+/** 더미 타격 간격 (사람의 1초보다 길게 해서 이길 수 있게) */
+export const BOT_ATTACK_COOLDOWN_MS = 1_500;
+/** 더미가 생각하는 간격: 평소 / 상대가 가까이 있을 때 */
+export const BOT_THINK_MS = 1_000;
+export const BOT_THINK_NEAR_MS = 400;
+/** 상대를 쫓아가기 시작하는 거리: 지키는 더미 / 수리를 막으러 간 공격팀 더미 (집 작업하러 가는 더미는 쫓지 않음) */
+export const BOT_CHASE_RANGE_DEFENDER = 6;
+export const BOT_CHASE_RANGE_ATTACKER = 3;

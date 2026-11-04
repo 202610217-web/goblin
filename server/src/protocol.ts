@@ -34,6 +34,11 @@ export type ClientMessage =
   | { t: "revive_stop" }
   /** 경기 종료 화면에서 "다시 하기" → 로비로 돌아가 다시 준비 */
   | { t: "rematch" }
+  /** 로비: 빈자리를 연습용 더미로 채우기 / 더미 모두 빼기 */
+  | { t: "add_bots" }
+  | { t: "remove_bots" }
+  /** 로비: 인원이 모자라도 지금 있는 사람(+더미)으로 연습 경기 바로 시작 */
+  | { t: "start_practice" }
   | { t: "debug_phase"; phase: Phase } // 개발용 강제 단계 전환 (DEBUG_COMMANDS=true 일 때만)
   | { t: "debug_teleport"; x: number; y: number } // 개발용 순간이동 (DEBUG_COMMANDS=true 일 때만)
   | { t: "debug_score"; A: number; B: number } // 개발용 점수 설정 (DEBUG_COMMANDS=true 일 때만)
@@ -55,6 +60,8 @@ export interface PublicPlayer {
   seq: number;
   /** 전투 상태 (체력, NORMAL/DOWNED/DEAD, 사망 예정 시각, 무적, 누적 기절/사망 횟수, 치유 중 정보) */
   combat: PublicCombat;
+  /** 연습용 더미인지 */
+  bot: boolean;
 }
 
 export type PublicCombat = Omit<Combat, "lastAttackAt"> & {
@@ -83,6 +90,8 @@ export interface RoomStateMessage {
   /** MATCH_END: 이긴 팀 (플레이어 이탈로 끝나면 null), 끝난 이유 */
   matchWinner: Team | null;
   matchEndReason: "score" | "player_left" | null;
+  /** 연습 경기인지 (인원이 모자라도 시작한 경기) */
+  practice: boolean;
   players: PublicPlayer[];
   serverTime: number;
 }
@@ -187,6 +196,12 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return { t: "revive_stop" };
     case "rematch":
       return { t: "rematch" };
+    case "add_bots":
+      return { t: "add_bots" };
+    case "remove_bots":
+      return { t: "remove_bots" };
+    case "start_practice":
+      return { t: "start_practice" };
     case "debug_teleport":
       if (typeof m.x !== "number" || typeof m.y !== "number" || !Number.isFinite(m.x) || !Number.isFinite(m.y)) return null;
       return { t: "debug_teleport", x: m.x, y: m.y };

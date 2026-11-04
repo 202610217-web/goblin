@@ -52,3 +52,12 @@ describe("치유 거리", () => {
     expect(inReach(me, { ...makeBody(11, 2, 0), z: 1.6 }, AIM.REVIVE_RANGE, AIM.REVIVE_MAX_HEIGHT_DIFF)).toBe(false);
   });
 });
+
+describe("붙어 있는 상대", () => {
+  it("몸이 겹칠 만큼 붙은 정면 상대도 맞는다", () => {
+    expect(findAimTarget(me, 0, P, [enemy(10.3, 2)])?.id).toBe("10.3,2");
+  });
+  it("붙어 있어도 등 뒤면 안 맞는다", () => {
+    expect(findAimTarget(me, 0, P, [enemy(9.7, 2)])).toBeNull();
+  });
+});

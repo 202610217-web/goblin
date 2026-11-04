@@ -125,6 +125,10 @@ const vib = $<HTMLInputElement>("vibrateToggle");
 vib.checked = vibrationEnabled();
 vib.onchange = () => { setVibration(vib.checked); if (vib.checked) vibrate(CONFIG.VIBRATE_HIT); };
 $("giveUpBtn").onclick = () => goToJoin("");
+// 혼자 연습: 빈자리를 더미로 채우기 / 빼기 / 인원이 모자라도 바로 시작
+$("addBotsBtn").onclick = () => net.send({ t: "add_bots" });
+$("removeBotsBtn").onclick = () => net.send({ t: "remove_bots" });
+$("practiceBtn").onclick = () => net.send({ t: "start_practice" });
 $("rematchBtn").onclick = () => net.send({ t: "rematch" });
 
 // 점수판 열기/닫기 (버튼 / Tab 키)
@@ -264,7 +268,7 @@ function applyRoomState(s: RoomStateMessage) {
       actors.set(p.id, a);
     }
     a.info = p;
-    a.view.setNickname(p.id === myId ? `${p.nickname} (나)` : p.nickname);
+    a.view.setNickname(p.id === myId ? `${p.nickname} (나)` : `${p.bot ? "🤖 " : ""}${p.nickname}`);
     reconcile(a, p.body, p.id === myId);
   }
 
@@ -387,12 +391,15 @@ function renderLobby() {
     const box = $(`team${t}`);
     box.replaceChildren(...room.players.filter((p) => p.team === t).map((p) => {
       const d = document.createElement("div");
-      d.textContent = `${p.nickname}${p.ready ? " ✔" : ""}${p.conn === "RECONNECTING" ? " (재접속 중)" : ""}`;
+      d.textContent = `${p.bot ? "🤖 " : ""}${p.nickname}${p.ready ? " ✔" : ""}${p.conn === "RECONNECTING" ? " (재접속 중)" : ""}`;
       if (p.id === myId) d.className = "me";
       if (p.ready) d.classList.add("ready");
       return d;
     }));
   }
+  const bots = room.players.filter((p) => p.bot).length;
+  $("addBotsBtn").classList.toggle("hidden", room.players.length >= 4);
+  $("removeBotsBtn").classList.toggle("hidden", bots === 0);
   const ready = !!myInfo()?.ready;
   const btn = $("readyBtn");
   btn.textContent = ready ? "준비 취소" : "준비";
@@ -430,7 +437,7 @@ function renderHud(now: number) {
   } else {
     const left = room.phaseEndsAt === null ? 0 : Math.max(0, Math.ceil((room.phaseEndsAt - now) / 1000));
     const mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, "0");
-    setText("hudRound", `라운드 ${room.round} · ${PHASE_NAME[room.phase]}`);
+    setText("hudRound", `${room.practice ? "연습 · " : ""}라운드 ${room.round} · ${PHASE_NAME[room.phase]}`);
     setText("hudTimer", room.phase === "MATCH_END" ? `${room.matchWinner ?? "-"}${room.matchWinner ? "팀 승리" : ""}` : room.phase === "COUNTDOWN" || room.phase === "ROUND_END" ? `${left}` : `${mm}:${ss}`);
     $("hudTimer").classList.toggle("urgent", movable() && left <= CONFIG.TIMER_URGENT_S);
     if (room.phase === "MATCH_END") setText("hudRole", "");
@@ -730,12 +737,13 @@ if (OFFLINE) {
   applyRoomState({
     t: "room_state", room: "연습", phase: "ATTACK", round: 1, attackingTeam: "A", phaseEndsAt: null,
     work: { kind: null, progress: 0, since: t0, holders: [], rate: 0, completesAt: null, checkpoint: 0.5 },
-    roundEnd: null, score: { A: 0, B: 0 }, history: [], matchPoint: [], deuce: false, matchWinner: null, matchEndReason: null,
+    roundEnd: null, score: { A: 0, B: 0 }, history: [], matchPoint: [], deuce: false, matchWinner: null, matchEndReason: null, practice: true,
     serverTime: t0,
     players: [{
       id: "me", nickname: "연습", team: "A", conn: "CONNECTED", reconnectDeadline: null, ready: true,
       body: makeBody(sp.x, sp.y, t0), seq: 0,
       combat: { hp: MAX_HP, state: "NORMAL", deathAt: null, invulnUntil: 0, downs: 0, deaths: 0, revive: null, attackReadyAt: 0 },
+      bot: false,
     }],
   });
 }
