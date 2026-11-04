@@ -4,12 +4,8 @@ export const CONFIG = {
   MAX_DPR: 2,
   /** 카메라 시야각(도) */
   CAMERA_FOV: 60,
-  /** 3인칭 카메라: 캐릭터 뒤 거리, 바라보는 높이, 기본/최소/최대 내려다보는 각(라디안) */
-  CAMERA_DISTANCE: 6.5,
-  CAMERA_TARGET_HEIGHT: 1.5,
+  /** 3인칭 카메라 기본 내려다보는 각(라디안). 거리/높이/어깨 위치/각도 범위는 조준 판정과 같아야 해서 shared/aim.ts */
   CAMERA_PITCH_DEFAULT: 0.42,
-  CAMERA_PITCH_MIN: 0.08,
-  CAMERA_PITCH_MAX: 1.2,
   /** 화면 드래그 1px당 카메라 회전(라디안), 키보드 회전 속도(라디안/초) */
   CAMERA_DRAG_SENSITIVITY: 0.006,
   CAMERA_KEY_SPEED: 2.4,

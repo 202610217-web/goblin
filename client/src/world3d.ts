@@ -2,6 +2,8 @@
 // 좌표 변환: 게임 (x=동, y=북, z=위) → Three.js (X=x, Y=z, Z=-y)
 import * as THREE from "three";
 import { BOXES, HOUSES, PHYS, type TeamId } from "../../shared/world";
+import { aimRay, clampPitch } from "../../shared/aim";
+import type { Body } from "../../shared/sim";
 import { CONFIG } from "./config";
 
 const tmp = new THREE.Vector3();
@@ -107,17 +109,15 @@ export class World3D {
     }
   }
 
-  /** 3인칭 카메라: 대상 뒤쪽 위에서 바라본다 */
+  /**
+   * 3인칭 카메라: 오른쪽 어깨 뒤 위에서 바라본다.
+   * 서버 타격 판정과 같은 광선(shared/aim.ts aimRay)을 써서 화면 가운데 = 조준점이 되게 한다.
+   */
   updateCamera(x: number, y: number, z: number) {
-    this.pitch = Math.min(CONFIG.CAMERA_PITCH_MAX, Math.max(CONFIG.CAMERA_PITCH_MIN, this.pitch));
-    const d = CONFIG.CAMERA_DISTANCE;
-    const tz = z + CONFIG.CAMERA_TARGET_HEIGHT;
-    const back = d * Math.cos(this.pitch);
-    const cx = x - Math.cos(this.yaw) * back;
-    const cy = y - Math.sin(this.yaw) * back;
-    const cz = tz + d * Math.sin(this.pitch);
-    World3D.toThree(cx, cy, cz, this.camera.position);
-    this.camera.lookAt(World3D.toThree(x, y, tz, tmp));
+    this.pitch = clampPitch(this.pitch);
+    const { origin, dir } = aimRay({ x, y, z } as Body, this.yaw, this.pitch);
+    World3D.toThree(origin.x, origin.y, origin.z, this.camera.position);
+    this.camera.lookAt(World3D.toThree(origin.x + dir.x, origin.y + dir.y, origin.z + dir.z, tmp));
   }
 
   render() {

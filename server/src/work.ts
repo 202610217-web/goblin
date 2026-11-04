@@ -88,13 +88,17 @@ export function isComplete(w: WorkState, now: number, rules: WorkRules = DEFAULT
 }
 
 /** 작업 시작 거부 사유 (null이면 허용) */
-export type HoldRejectReason = "wrong_phase" | "wrong_team" | "not_connected" | "too_far" | "already_holding";
+export type HoldRejectReason = "wrong_phase" | "wrong_team" | "not_connected" | "not_normal" | "busy" | "too_far" | "already_holding";
 
 export interface HoldCheck {
   phase: Phase;
   attackingTeam: Team;
   playerTeam: Team;
   connected: boolean;
+  /** 정상 상태인지 (기절/사망이면 작업 불가) */
+  normal: boolean;
+  /** 치유 중인지 */
+  reviving: boolean;
   /** 해당 집 작업 가능 범위 안에 있는지 (isNearHouse 결과) */
   nearTarget: boolean;
   alreadyHolding: boolean;
@@ -108,6 +112,8 @@ export function checkHoldStart(c: HoldCheck): HoldRejectReason | null {
   if (c.phase === "ATTACK" && !isAttacker) return "wrong_team";
   if (c.phase === "REPAIR" && isAttacker) return "wrong_team";
   if (!c.connected) return "not_connected";
+  if (!c.normal) return "not_normal";
+  if (c.reviving) return "busy";
   if (c.alreadyHolding) return "already_holding";
   if (!c.nearTarget) return "too_far";
   return null;

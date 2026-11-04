@@ -126,7 +126,7 @@ describe("단계 종료 중 작업", () => {
 });
 
 describe("hold_start 검증", () => {
-  const ok: HoldCheck = { phase: "ATTACK", attackingTeam: "A", playerTeam: "A", connected: true, nearTarget: true, alreadyHolding: false };
+  const ok: HoldCheck = { phase: "ATTACK", attackingTeam: "A", playerTeam: "A", connected: true, normal: true, reviving: false, nearTarget: true, alreadyHolding: false };
   it("공격팀이 ATTACK 중 집 근처면 허용", () => expect(checkHoldStart(ok)).toBeNull());
   it("수비팀은 ATTACK 중 부수기 불가", () => expect(checkHoldStart({ ...ok, playerTeam: "B" })).toBe("wrong_team"));
   it("수비팀은 REPAIR 중 수리 가능, 공격팀은 불가", () => {
@@ -142,6 +142,10 @@ describe("hold_start 검증", () => {
     expect(checkHoldStart({ ...ok, nearTarget: false })).toBe("too_far");
     expect(checkHoldStart({ ...ok, connected: false })).toBe("not_connected");
     expect(checkHoldStart({ ...ok, alreadyHolding: true })).toBe("already_holding");
+  });
+  it("기절/사망 상태나 치유 중에는 작업 불가", () => {
+    expect(checkHoldStart({ ...ok, normal: false })).toBe("not_normal");
+    expect(checkHoldStart({ ...ok, reviving: true })).toBe("busy");
   });
   it("대상 집은 수비팀 집", () => {
     expect(targetHouseTeam("A")).toBe("B");

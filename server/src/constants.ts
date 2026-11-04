@@ -65,3 +65,21 @@ export const WORK_CHECKPOINT = 0.5;
 export const WORK_MULTI_SPEED = 1.0;
 /** 작업 가능 거리는 클라이언트도 알아야 해서 shared/world.ts에 있다 */
 export { HOUSE_WORK_DISTANCE, HOUSE_WORK_MAX_FOOT_Z } from "../../shared/world";
+
+// ---------- 4단계: 전투 (체력 / 기절 / 사망 / 치유) ----------
+/** 최대 체력 */
+export const MAX_HP = 100;
+/** 타격 1회 데미지 */
+export const HIT_DAMAGE = 25;
+/** 타격 쿨다운 */
+export const ATTACK_COOLDOWN_MS = 1_000;
+/** 기절 후 사망까지 */
+export const DOWN_TO_DEATH_MS = 20_000;
+/** 치유에 걸리는 시간 (계속 누르고 있어야 함) */
+export const REVIVE_TIME_MS = 3_000;
+/** 치유 후 체력 비율 */
+export const REVIVE_HP_RATIO = 0.3;
+/** 부활 후 무적 시간 */
+export const REVIVE_INVULN_MS = 1_500;
+/** 타격 사거리, 치유 거리, 높이 차이, 카메라(조준) 수치는 화면과 같아야 해서 shared/aim.ts에 있다 */
+export { AIM } from "../../shared/aim";

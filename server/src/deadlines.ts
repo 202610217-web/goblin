@@ -3,10 +3,14 @@
 // 가장 가까운 시각으로 알람을 다시 건다.
 // 이후 단계에서 페이즈 종료/작업 완료/사망/치유 완료 등이 kind로 추가된다.
 
-export type DeadlineKind = "reconnect" | "phase" | "work";
+export type DeadlineKind = "reconnect" | "phase" | "work" | "death" | "revive";
 
-/** 같은 시각에 겹치면 먼저 처리할 순서 (작업 완료가 시간 초과보다 먼저) */
-const PRIORITY: Record<DeadlineKind, number> = { work: 0, phase: 1, reconnect: 2 };
+/**
+ * 같은 시각에 겹치면 먼저 처리할 순서.
+ * 작업 완료 > 치유 완료 > 사망 > 단계 시간 초과 > 재접속 마감
+ * (예: 치유 완료와 사망이 같은 순간이면 치유가 먼저 = 살아남는다)
+ */
+const PRIORITY: Record<DeadlineKind, number> = { work: 0, revive: 1, death: 2, phase: 3, reconnect: 4 };
 
 export interface Deadline {
   kind: DeadlineKind;

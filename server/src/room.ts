@@ -9,6 +9,7 @@ import {
   MOVE_PERSIST_INTERVAL_MS,
   JUMP_RATE_LIMIT_PER_SEC,
   MOVE_RATE_LIMIT_PER_SEC,
+  ATTACK_COOLDOWN_MS,
   MSG_RATE_LIMIT_PER_SEC,
   PING_MESSAGE,
   PONG_MESSAGE,
@@ -18,6 +19,21 @@ import {
 } from "./constants";
 import { type Body, groundHeightAt, makeBody, roundBody, simulate, withAngle, withJump } from "../../shared/sim";
 import { PHYS, isNearHouse } from "../../shared/world";
+import { AIM, findAimTarget, inReach } from "../../shared/aim";
+import {
+  type Combat,
+  applyDeath,
+  checkAttack,
+  checkReviveStart,
+  completeRevive,
+  isHittable,
+  newCombat,
+  resetForRound,
+  resolveHit,
+  startRevive,
+  stopRevive,
+  wipeWinner,
+} from "./combat";
 import {
   type HoldRejectReason,
   type WorkState,
@@ -42,6 +58,7 @@ import {
   nextOnTimeout,
   nextOnWorkComplete,
   startMatch,
+  enterPhase,
 } from "./phase";
 import {
   type ClientMessage,
@@ -69,6 +86,8 @@ interface PlayerRecord {
   wantA: number;
   /** 마지막으로 처리한 입력 순번 (클라이언트 예측 보정용) */
   seq: number;
+  /** 체력, 기절/사망, 치유 상태 */
+  c: Combat;
 }
 
 /** storage에 저장되는 방 상태 */
@@ -76,6 +95,8 @@ interface RoomState extends PhaseState {
   code: string;
   /** 집 작업(부수기/수리) 상태 */
   work: WorkState;
+  /** 이번 라운드가 전멸로 끝났으면 이긴 팀 (승점은 5단계) */
+  roundEnd: { winner: Team; reason: "wipe" } | null;
   players: PlayerRecord[];
   deadlines: Deadline[];
 }
@@ -94,11 +115,26 @@ interface RateWindow {
 const STATE_KEY = "room";
 
 /** hold_start 거부 사유 → 안내 문구 */
+const ATTACK_REJECT_TEXT: Record<string, string> = {
+  wrong_phase: "지금은 타격할 수 없어요",
+  not_normal: "기절/사망 상태에서는 타격할 수 없어요",
+  busy: "작업이나 치유 중에는 타격할 수 없어요",
+  cooldown: "아직 타격할 수 없어요 (쿨다운)",
+};
+const REVIVE_REJECT_TEXT: Record<string, string> = {
+  wrong_phase: "지금은 치유할 수 없어요",
+  not_normal: "기절/사망 상태에서는 치유할 수 없어요",
+  busy: "작업 중에는 치유할 수 없어요",
+  no_target: "근처에 기절한 팀원이 없어요",
+};
+
 const HOLD_REJECT_TEXT: Record<HoldRejectReason, string> = {
   wrong_phase: "지금은 집 작업을 할 수 없어요",
   wrong_team: "우리 팀이 할 수 있는 작업이 아니에요",
   not_connected: "연결 상태를 확인해 주세요",
   too_far: "집에 더 가까이 가야 해요",
+  not_normal: "기절/사망 상태에서는 작업할 수 없어요",
+  busy: "치유 중에는 작업할 수 없어요",
   already_holding: "이미 작업 중이에요",
 };
 
@@ -130,7 +166,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 function emptyState(code: string): RoomState {
-  return { code, ...initialPhase(), work: workForPhase("LOBBY", 0), players: [], deadlines: [] };
+  return { code, ...initialPhase(), work: workForPhase("LOBBY", 0), roundEnd: null, players: [], deadlines: [] };
 }
 
 /** 1초 창 안에서 limit 개까지 허용 */
@@ -249,6 +285,7 @@ export class GameRoom extends DurableObject<Env> {
       body: spawnBody(team, st.players.filter((p) => p.team === team).length, now),
       wantA: -1,
       seq: 0,
+      c: newCombat(),
     };
     st.players.push(player);
     ws.serializeAttachment({ playerId: player.id } satisfies SocketAttachment);
@@ -295,8 +332,8 @@ export class GameRoom extends DurableObject<Env> {
           return this.sendError(ws, "rate_limited", "이동 메시지가 너무 많아요");
         }
         player.seq = msg.s;
-        // 작업 중에는 그 자리에 고정 (이동 의도만 기억했다가 버튼을 떼면 적용)
-        const movable = canMoveIn(st.phase) && !this.isHolding(player.id);
+        // 작업/치유 중이거나 기절/사망이면 그 자리에 고정 (이동 의도만 기억했다가 풀리면 적용)
+        const movable = this.canMoveNow(player);
         if (msg.t === "move") {
           player.wantA = msg.a;
           // 이동 불가 단계면 정지 상태 유지 (원하는 방향만 기억)
@@ -320,6 +357,8 @@ export class GameRoom extends DurableObject<Env> {
           attackingTeam: st.attackingTeam,
           playerTeam: player.team,
           connected: player.conn === "CONNECTED",
+          normal: player.c.state === "NORMAL",
+          reviving: player.c.revive !== null,
           nearTarget: isNearHouse(target, body.x, body.y, body.z),
           alreadyHolding: this.isHolding(player.id),
         });
@@ -338,6 +377,58 @@ export class GameRoom extends DurableObject<Env> {
         await this.saveAndSchedule();
         this.broadcastMove(player);
         this.broadcastWork(now);
+        return;
+
+      case "attack": {
+        const reason = checkAttack(player.c, st.phase, this.isHolding(player.id), now);
+        if (reason) return this.sendError(ws, "cannot_attack", ATTACK_REJECT_TEXT[reason]!);
+        player.c = { ...player.c, lastAttackAt: now };
+        // 화면 가운데 조준점 광선으로 맞은 상대 찾기 (모든 위치는 지금 시각 기준)
+        const me = simulate(player.body, now);
+        const candidates = st.players
+          .filter((p) => p.team !== player.team && isHittable(p.c, now))
+          .map((p) => ({ id: p.id, body: simulate(p.body, now), p }));
+        const hit = findAimTarget(me, msg.yaw, msg.pitch, candidates);
+        if (hit) {
+          const r = resolveHit(hit.p.c, hit.p.id, st.work, now); // 맞아도 작업 유지, 기절하면 작업 중단
+          hit.p.c = r.c;
+          st.work = r.work;
+          if (hit.p.c.state === "DOWNED") this.onDowned(hit.p, now);
+        }
+        this.broadcast({ t: "swing", by: player.id, target: hit?.id ?? null, serverTime: now });
+        this.checkWipe(now);
+        await this.saveAndSchedule();
+        this.broadcastRoomState(now);
+        if (hit) this.broadcastWork(now); // 기절로 작업이 멈췄을 수 있음
+        return;
+      }
+
+      case "revive_start": {
+        // 근처(1.5m, 높이 차 1.2m)의 기절한 같은 팀원 중 가장 가까운 사람
+        const me = simulate(player.body, now);
+        let target: PlayerRecord | null = null;
+        let best = Infinity;
+        for (const p of st.players) {
+          if (p.id === player.id || p.team !== player.team || p.c.state !== "DOWNED") continue;
+          const b = simulate(p.body, now);
+          if (!inReach(me, b, AIM.REVIVE_RANGE, AIM.REVIVE_MAX_HEIGHT_DIFF)) continue;
+          const d = Math.hypot(me.x - b.x, me.y - b.y);
+          if (d < best) { best = d; target = p; }
+        }
+        const reason = checkReviveStart(player.c, st.phase, this.isHolding(player.id), target?.c ?? null);
+        if (reason || !target) return this.sendError(ws, "cannot_revive", REVIVE_REJECT_TEXT[reason ?? "no_target"]!);
+        player.c = startRevive(player.c, target.id, now);
+        st.deadlines = upsertDeadline(st.deadlines, { kind: "revive", key: player.id, at: player.c.revive!.endsAt });
+        this.refreshMotion(player, now); // 치유 중에는 제자리 고정
+        await this.saveAndSchedule();
+        this.broadcastRoomState(now);
+        return;
+      }
+
+      case "revive_stop":
+        if (!this.cancelRevive(player, now)) return;
+        await this.saveAndSchedule();
+        this.broadcastRoomState(now);
         return;
 
       case "debug_teleport": {
@@ -395,6 +486,7 @@ export class GameRoom extends DurableObject<Env> {
       player.reconnectDeadline = now + RECONNECT_GRACE_MS;
       player.wantA = -1;
       this.releaseHold(player, now); // 작업 중이었다면 중단
+      this.cancelRevive(player, now); // 치유 중이었다면 중단
       player.body = stopped(player.body, now); // 재접속 대기 중에는 정지
       st.deadlines = upsertDeadline(st.deadlines, { kind: "reconnect", key: player.id, at: player.reconnectDeadline });
       await this.saveAndSchedule();
@@ -432,7 +524,19 @@ export class GameRoom extends DurableObject<Env> {
         } else if (d.kind === "work") {
           // 집 작업 100% → 부수기 완료는 REPAIR, 수리 완료는 ROUND_END (판정 시각은 완료 예정 시각)
           const kind = st.work.kind;
-          if (kind && isComplete(st.work, d.at)) this.applyPhase(nextOnWorkComplete(st, kind, d.at), d.at);
+          if (kind && isComplete(st.work, d.at)) {
+            this.applyPhase(nextOnWorkComplete(st, kind, d.at), d.at);
+            this.checkWipe(d.at); // REPAIR 시작 순간 수비팀이 이미 전멸이면 바로 종료
+          }
+        } else if (d.kind === "revive") {
+          this.onReviveDue(d.key, d.at);
+        } else if (d.kind === "death") {
+          // 기절 후 20초 동안 치유받지 못함 → 사망
+          const p = st.players.find((x) => x.id === d.key);
+          if (p && p.c.state === "DOWNED" && p.c.deathAt !== null && p.c.deathAt <= d.at) {
+            p.c = applyDeath(p.c);
+            for (const q of st.players) if (q.c.revive?.target === p.id) this.cancelRevive(q, d.at); // 대상이 죽으면 치유 중단
+          }
         } else if (d.kind === "reconnect") {
           // 재접속 대기 시간 초과 → 이탈 처리
           const p = st.players.find((x) => x.id === d.key && x.conn === "RECONNECTING");
@@ -459,11 +563,67 @@ export class GameRoom extends DurableObject<Env> {
     const st = this.state!;
     if (!st.work.holders.includes(player.id)) return false;
     st.work = stopHold(st.work, player.id, now);
-    // 고정 해제: 누르고 있던 이동 방향이 있으면 바로 출발
-    if (canMoveIn(st.phase) && player.conn === "CONNECTED") player.body = roundBody(withAngle(player.body, player.wantA, now));
-    this.movesDirty = true;
+    this.refreshMotion(player, now); // 고정 해제: 누르고 있던 이동 방향이 있으면 바로 출발
     this.scheduleWork();
     return true;
+  }
+
+  // ---------- 전투 ----------
+  /** 지금 움직일 수 있는지: 이동 단계 + 정상 상태 + 작업/치유 중 아님 + 접속 중 */
+  private canMoveNow(p: PlayerRecord): boolean {
+    return canMoveIn(this.state!.phase) && p.conn === "CONNECTED" && p.c.state === "NORMAL" && !p.c.revive && !this.isHolding(p.id);
+  }
+
+  /** 상태에 맞게 이동을 다시 맞춘다 (움직일 수 있으면 원하는 방향으로, 아니면 정지) */
+  private refreshMotion(p: PlayerRecord, now: number) {
+    const a = this.canMoveNow(p) ? p.wantA : -1;
+    if (a !== p.body.a) {
+      p.body = roundBody(withAngle(p.body, a, now));
+      this.movesDirty = true;
+    }
+  }
+
+  /** 기절 처리: 작업/치유 즉시 중단, 정지, 사망 타이머 등록 */
+  private onDowned(p: PlayerRecord, now: number) {
+    const st = this.state!;
+    this.releaseHold(p, now); // (resolveHit에서 이미 빠졌으면 아무 일 없음)
+    this.scheduleWork(); // 작업 완료 예정 시각 다시 계산
+    st.deadlines = removeDeadline(st.deadlines, "revive", p.id); // applyHit이 revive 기록은 이미 지움
+    this.refreshMotion(p, now);
+    st.deadlines = upsertDeadline(st.deadlines, { kind: "death", key: p.id, at: p.c.deathAt! });
+  }
+
+  /** 치유 중단 (버튼 뗌/기절/대상 사망/접속 끊김). 중단했으면 true */
+  private cancelRevive(p: PlayerRecord, now: number): boolean {
+    if (!p.c.revive) return false;
+    p.c = stopRevive(p.c);
+    this.state!.deadlines = removeDeadline(this.state!.deadlines, "revive", p.id);
+    this.refreshMotion(p, now);
+    return true;
+  }
+
+  /** 치유 완료 시각 도달: 대상이 아직 기절 상태면 부활 */
+  private onReviveDue(reviverId: string, at: number) {
+    const st = this.state!;
+    const r = st.players.find((x) => x.id === reviverId);
+    if (!r?.c.revive || r.c.revive.endsAt > at) return;
+    const target = st.players.find((x) => x.id === r.c.revive!.target);
+    if (target && target.c.state === "DOWNED") {
+      target.c = completeRevive(target.c, at);
+      st.deadlines = removeDeadline(st.deadlines, "death", target.id);
+      this.refreshMotion(target, at);
+    }
+    this.cancelRevive(r, at);
+  }
+
+  /** 전멸 확인: 라운드를 끝내야 하면 ROUND_END로 */
+  private checkWipe(now: number) {
+    const st = this.state!;
+    const teams = { A: st.players.filter((p) => p.team === "A").map((p) => p.c), B: st.players.filter((p) => p.team === "B").map((p) => p.c) };
+    const winner = wipeWinner(st.phase, st.attackingTeam, teams);
+    if (!winner) return;
+    this.applyPhase(enterPhase(st, "ROUND_END", now), now);
+    st.roundEnd = { winner, reason: "wipe" };
   }
 
   /** 작업 완료 예정 시각을 마감 시각 목록에 넣는다 (아무도 안 누르면 제거) */
@@ -489,6 +649,7 @@ export class GameRoom extends DurableObject<Env> {
   private tryStartMatch(now: number) {
     const st = this.state;
     if (!st || st.phase !== "LOBBY" || !canStartMatch(st.players)) return;
+    for (const p of st.players) p.c = newCombat(); // 경기 시작: 누적 기절/사망 횟수도 0
     this.applyPhase(startMatch(now), now);
   }
 
@@ -496,8 +657,6 @@ export class GameRoom extends DurableObject<Env> {
   private applyPhase(next: PhaseState, now: number) {
     const st = this.state!;
     const enteredNewRound = next.phase === "COUNTDOWN" && (st.phase !== "COUNTDOWN" || st.round !== next.round);
-    const becameMovable = !canMoveIn(st.phase) && canMoveIn(next.phase);
-    const prevHolders = st.work.holders;
     // 단계가 바뀌면 작업은 중단되고, 새 단계에 맞는 작업(0%)으로 초기화
     if (next.phase !== st.phase || next.round !== st.round) {
       st.work = workForPhase(next.phase, now);
@@ -508,27 +667,24 @@ export class GameRoom extends DurableObject<Env> {
     st.attackingTeam = next.attackingTeam;
     st.phaseEndsAt = next.phaseEndsAt;
 
+    // 라운드가 끝나거나 새로 시작되면 치유는 중단되고 사망 타이머도 없어진다 (ATTACK→REPAIR는 같은 라운드라 유지)
+    if (!canMoveIn(st.phase)) {
+      for (const p of st.players) p.c = stopRevive(p.c);
+      st.deadlines = st.deadlines.filter((d) => d.kind !== "revive" && d.kind !== "death");
+    }
+    if (st.phase === "LOBBY") for (const p of st.players) { p.ready = false; p.c = newCombat(); }
     if (enteredNewRound) {
-      // 라운드 시작: 모두 팀별 시작 위치로
+      st.roundEnd = null;
+      // 라운드 시작: 체력/상태 초기화(사망자도 부활), 팀별 시작 위치로
       for (const team of ["A", "B"] as const) {
         st.players.filter((p) => p.team === team).forEach((p, i) => {
+          p.c = resetForRound(p.c);
           p.body = spawnBody(team, i, now);
         });
       }
-    } else if (!canMoveIn(st.phase)) {
-      for (const p of st.players) p.body = stopped(p.body, now);
-    } else if (becameMovable) {
-      // 이동 가능해지는 순간: 준비 단계 동안 누르고 있던 방향으로 바로 출발
-      for (const p of st.players) if (p.conn === "CONNECTED") p.body = roundBody(withAngle(p.body, p.wantA, now));
-    }
-    if (st.phase === "LOBBY") for (const p of st.players) p.ready = false;
-    // 부수기 완료로 REPAIR가 되면 작업하던 공격팀은 고정이 풀려 바로 움직일 수 있다
-    if (canMoveIn(st.phase) && !becameMovable) {
-      for (const p of st.players) {
-        if (prevHolders.includes(p.id) && !st.work.holders.includes(p.id) && p.conn === "CONNECTED") {
-          p.body = roundBody(withAngle(p.body, p.wantA, now));
-        }
-      }
+    } else {
+      // 이동 가능해지면 누르고 있던 방향으로 바로 출발, 불가능해지면 정지 (작업이 끝난 사람의 고정도 풀림)
+      for (const p of st.players) this.refreshMotion(p, now);
     }
 
     st.deadlines = st.phaseEndsAt === null
@@ -569,7 +725,10 @@ export class GameRoom extends DurableObject<Env> {
   /** 플레이어 제거. 게임 중에 인원이 빠지면 (임시 규칙) 로비로 돌아간다 */
   private async removePlayers(ids: string[], now: number) {
     const st = await this.load();
-    for (const p of st.players) if (ids.includes(p.id)) this.releaseHold(p, now);
+    for (const p of st.players) {
+      if (ids.includes(p.id)) { this.releaseHold(p, now); this.cancelRevive(p, now); }
+      else if (p.c.revive && ids.includes(p.c.revive.target)) this.cancelRevive(p, now);
+    }
     st.players = st.players.filter((p) => !ids.includes(p.id));
     for (const id of ids) st.deadlines = removeDeadline(st.deadlines, "reconnect", id);
     if (st.phase !== "LOBBY" && ids.length > 0) {
@@ -616,6 +775,16 @@ export class GameRoom extends DurableObject<Env> {
       ready: p.ready,
       body: p.body,
       seq: p.seq,
+      combat: {
+        hp: p.c.hp,
+        state: p.c.state,
+        deathAt: p.c.deathAt,
+        invulnUntil: p.c.invulnUntil,
+        downs: p.c.downs,
+        deaths: p.c.deaths,
+        revive: p.c.revive,
+        attackReadyAt: p.c.lastAttackAt + ATTACK_COOLDOWN_MS,
+      },
     }));
   }
 
@@ -631,6 +800,7 @@ export class GameRoom extends DurableObject<Env> {
       attackingTeam: st.attackingTeam,
       phaseEndsAt: st.phaseEndsAt,
       work: this.workInfo(),
+      roundEnd: st.roundEnd,
       players: this.publicPlayers(),
       serverTime: now,
     });
