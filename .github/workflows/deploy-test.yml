@@ -22,16 +22,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # 화면 먼저 설치: 서버 테스트가 화면 코드(고블린 모델의 three)도 검사한다
+      - name: 화면 설치 + 타입 검사
+        working-directory: client
+        run: |
+          npm ci
+          npx tsc --noEmit
       - name: 서버 설치 + 단위 테스트 + 타입 검사
         working-directory: server
         run: |
           npm ci
           npx vitest run
-          npx tsc --noEmit
-      - name: 화면 설치 + 타입 검사
-        working-directory: client
-        run: |
-          npm ci
           npx tsc --noEmit
 
   deploy-server:
