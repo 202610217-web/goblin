@@ -138,8 +138,9 @@
 
 **전투** — `server/src/combat.ts`, `shared/aim.ts`
 - 직업(`shared/classes.ts CLASSES`): **기사** 체력 150, 쿨다운 1.0초, 사거리 2m 근접 / **궁수** 체력 70, 쿨다운 1.4초, 화살 최대 12m. 타격 피해는 둘 다 25(`HIT_DAMAGE`) → 기사 6번, 궁수 3번에 기절.
-- 기사 판정은 아래 조준점 광선. **궁수 화살**: `{t:"attack", yaw, pitch}`를 받으면 서버가 `makeArrow`로 화살을 만들고 `{t:"shot", by, origin, dir, at}`를 방송, 초속 30m 직선으로 50ms마다 구간 판정(`arrowSegmentHit`, 벽에 막힘, 먼저 맞는 1명). 화면은 같은 값으로 화살을 그림(`world3d addArrow/removeArrow`).
-- **타격 판정 = 화면 가운데 조준점 광선**: 클라이언트가 `{t:"attack", yaw, pitch}`를 보내면 서버가 같은 `aimRay`로 계산. 조건: 사거리 2m(수평 중심거리), 높이 차 1.2m 이하, 등 뒤 아님, 벽에 안 가림, 광선에 먼저 걸리는 1명. 몸이 겹칠 만큼 붙은 정면 상대는 조준선과 무관하게 맞음.
+- 기사 판정은 아래 부채꼴. **궁수 화살**: `{t:"attack", yaw, pitch}`를 받으면 서버가 `makeArrow`로 화살을 만들고 `{t:"shot", by, origin, dir, at}`를 방송, 초속 30m 직선으로 50ms마다 구간 판정(`arrowSegmentHit`, 벽에 막힘, 먼저 맞는 1명). 화면은 같은 값으로 화살을 그림(`world3d addArrow/removeArrow`).
+- **기사 타격 판정 = 조준 방향 양옆 30도 부채꼴** (`findAimTarget`, `0a433b9`부터): 클라이언트가 `{t:"attack", yaw, pitch}`를 보내면 서버가 yaw 기준 ±30°(`AIM.ATTACK_HALF_ANGLE`), 사거리 2m(수평 중심거리), 높이 차 1.2m 이하, 가슴↔가슴 사이 벽 없음을 확인. 여럿이면 각도가 가장 작은(같으면 가까운) 1명. pitch는 근접 판정에 안 씀. 몸이 겹칠 만큼 붙은 앞쪽 상대가 최우선.
+- 카메라: 위로 올려다보기 가능(`PITCH_MIN -0.6`, 땅속으로 안 들어가게 카메라를 당김). 궁수는 어깨를 더 비키고(1.2m) 조준선을 12m에 모아(`ARCHER_SHOULDER/ARCHER_CONVERGE`, `aimRay(..., ranged)`) 조준점이 내 몸에 안 겹침. 버튼 연타·두 손가락 확대는 `input.ts`에서 막음(iOS가 user-scalable=no를 무시해서).
 - 같은 팀 타격 불가. 준비 단계·작업 중·치유 중·기절/사망 상태에서 타격 불가.
 - 기절(DOWNED): 체력 0 → 이동/타격/작업 불가, 추가 피격 무시, 20초 사망 타이머.
 - 사망(DEAD): 라운드 끝까지 행동 불가(다음 라운드 부활).
