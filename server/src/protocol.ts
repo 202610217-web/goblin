@@ -29,6 +29,8 @@ export type ClientMessage =
   | { t: "move"; a: number; s: number; at?: number }
   /** 점프 (땅에 있을 때만 서버가 허용). at = 화면에서 누른 서버 기준 시각 (지연 보정, 최대 0.5초 전까지) */
   | { t: "jump"; s: number; at?: number }
+  /** 앉기(on=true) / 일어서기. s, at은 점프와 같음 */
+  | { t: "crouch"; on: boolean; s: number; at?: number }
   /** 집 작업 버튼 누름 / 뗌 (매 프레임 보내지 않고 이 2개만 보낸다) */
   | { t: "hold_start" }
   | { t: "hold_stop" }
@@ -209,6 +211,9 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case "jump":
       if (!isSeq(m.s)) return null;
       return { t: "jump", s: m.s, at: isTime(m.at) ? m.at : undefined };
+    case "crouch":
+      if (typeof m.on !== "boolean" || !isSeq(m.s)) return null;
+      return { t: "crouch", on: m.on, s: m.s, at: isTime(m.at) ? m.at : undefined };
     case "hold_start":
       return { t: "hold_start" };
     case "hold_stop":

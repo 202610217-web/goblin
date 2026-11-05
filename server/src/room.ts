@@ -20,7 +20,7 @@ import {
   SPAWNS,
   FIRST_ATTACKING_TEAM,
 } from "./constants";
-import { type Body, groundHeightAt, makeBody, roundBody, simulate, withAngle, withJump } from "../../shared/sim";
+import { type Body, groundHeightAt, makeBody, roundBody, simulate, withAngle, withCrouch, withJump } from "../../shared/sim";
 import { type BarrierRole, MAPS, PHYS, type SiteId, isNearHouse, isNearSite } from "../../shared/world";
 import { NEON_SPAWNS } from "../../shared/neon";
 import { AIM, findAimTarget, inReach } from "../../shared/aim";
@@ -423,7 +423,8 @@ export class GameRoom extends DurableObject<Env> {
         return;
 
       case "move":
-      case "jump": {
+      case "jump":
+      case "crouch": {
         // 이동은 초당 MOVE_RATE_LIMIT_PER_SEC, 점프는 초당 JUMP_RATE_LIMIT_PER_SEC 회까지만 (연결별)
         const limited = msg.t === "move"
           ? !allowInWindow(this.moveRate, ws, MOVE_RATE_LIMIT_PER_SEC, now)
@@ -443,6 +444,8 @@ export class GameRoom extends DurableObject<Env> {
           // 이동 불가 단계면 정지 상태 유지 (원하는 방향만 기억)
           const a = movable ? msg.a : -1;
           if (a !== player.body.a) player.body = roundBody(withAngle(player.body, a, at));
+        } else if (msg.t === "crouch") {
+          if (movable || !msg.on) player.body = roundBody(withCrouch(player.body, msg.on, at)); // 일어서기는 언제나
         } else if (movable) {
           const jumped = withJump(player.body, at); // 공중에 있으면 null (무시)
           if (jumped) player.body = roundBody(jumped);

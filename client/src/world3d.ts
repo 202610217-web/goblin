@@ -489,7 +489,8 @@ export class PlayerView {
   /** 카메라가 아주 가까우면 내 캐릭터를 숨긴다 (화면을 가리지 않게) */
   nearCamera = false;
 
-  update(x: number, y: number, z: number, faceRad: number, groundZ: number, state: 0 | 1 | 2, invuln: boolean, dim: boolean, nowMs: number) {
+  update(x: number, y: number, z: number, faceRad: number, groundZ: number, state: 0 | 1 | 2, invuln: boolean, dim: boolean, nowMs: number, crouch = false) {
+    this.pivot.scale.y = state === 0 && crouch ? PHYS.CROUCH_HEIGHT / PHYS.PLAYER_HEIGHT : 1; // 앉으면 낮게
     World3D.toThree(x, y, z, this.group.position);
     this.group.rotation.y = faceRad;
     this.pivot.rotation.x = state === 0 ? 0 : Math.PI / 2; // 옆으로 눕힘

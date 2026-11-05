@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Body, groundHeightAt, isValidAngle, makeBody, radToAngle, simulate, withAngle, withJump } from "../../shared/sim";
+import { bodyHeight, groundHeightAt, isValidAngle, makeBody, radToAngle, roundBody, simulate, type Body, withAngle, withCrouch, withJump } from "../../shared/sim";
 import { BOXES, PHYS } from "../../shared/world";
 
 const EAST = 0; // 0 단계 = +x
@@ -107,5 +107,24 @@ describe("점프", () => {
   it("바닥 높이 계산", () => {
     expect(groundHeightAt(24, 14, 5)).toBeCloseTo(1.6, 5); // 단상 위
     expect(groundHeightAt(24, 14, 0)).toBe(0); // 단상보다 낮은 곳에서는 땅
+  });
+});
+
+describe("앉기 / 파쿠르", () => {
+  it("앉으면 키가 낮아지고 절반 속도로 걷는다, 뛰면 일어난다", () => {
+    const crouched = withCrouch(makeBody(5, 2, 0), true, 0);
+    expect(bodyHeight(crouched)).toBe(PHYS.CROUCH_HEIGHT);
+    const walked = simulate(withAngle(crouched, 0, 0), 1000);
+    expect(walked.x - 5).toBeCloseTo(PHYS.SPEED * PHYS.CROUCH_SPEED, 5);
+    expect(withJump(walked, 1000)!.k).toBeUndefined();
+    expect(roundBody(crouched).k).toBe(true);
+  });
+  it("기본 맵의 2.2m 벽은 뛰어도 못 오른다 (파쿠르는 2.13m까지)", () => {
+    // 가운데 서쪽 엄폐벽: x 16.6~17.4, y 12~16, 높이 2.2
+    let b = withAngle(makeBody(15.4, 14, 0), 0, 0);
+    b = withJump(b, 60)!;
+    b = simulate(b, 1500);
+    expect(b.x).toBeLessThan(16.6);
+    expect(b.z).toBe(0);
   });
 });

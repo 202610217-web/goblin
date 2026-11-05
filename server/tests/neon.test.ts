@@ -101,7 +101,7 @@ describe("NEON DISTRICT 맵", () => {
     expect(b.y).toBeCloseTo(15 * 2 - PHYS.PLAYER_HALF, 3);
   });
 
-  it("방호벽은 가슴 높이 화살을 막고, 점프로 넘을 수 없다 (엄폐)", () => {
+  it("방호벽은 가슴 높이 화살을 막고, 걸어서는 못 넘지만 뛰면 타고 넘는다 (파쿠르)", () => {
     // 광장 시장 쪽 방호벽 J (c 28, s 13): 서쪽에서 동쪽으로 쏜 화살은 벽에서 멈춘다
     const wall = cellCenter(28, 13);
     const shooter = makeBody(wall.x - 5, wall.y, 0);
@@ -114,11 +114,21 @@ describe("NEON DISTRICT 맵", () => {
       if (r.stopped) break;
     }
     expect(hit).toBeNull();
-    // 벽 앞에서 점프하며 걸어도 못 넘어간다
+    // 걷기만 하면 벽 앞에서 멈춘다
+    expect(walk(makeBody(wall.x - 2, wall.y, 0), E, 1500).x).toBeLessThan(wall.x);
+    // 뛰면서 부딪히면 위로 올라섰다가 반대편으로 내려간다
     let b = withAngle(makeBody(wall.x - 2, wall.y, 0), 0, 0);
-    b = withJump(b, 100)!;
+    b = withJump(b, 50)!;
     b = simulate(b, 1500);
-    expect(b.x).toBeLessThan(wall.x);
+    expect(b.x).toBeGreaterThan(wall.x + 1);
+  });
+
+  it("파쿠르: 2m 짐 더미 위로 올라설 수 있다", () => {
+    const cargo = cellCenter(45, 24); // A 사이트 동쪽 짐 더미 (높이 2m)
+    let b = withAngle(makeBody(cargo.x - 2.2, cargo.y, 0), 0, 0);
+    b = withJump(b, 120)!; // 상자 앞에서 뛰기
+    b = simulate(b, 500);
+    expect(b.z).toBeCloseTo(2, 3);
   });
 
   it("실내 방: 서쪽 문으로 들어가 동쪽 문으로 나간다", () => {

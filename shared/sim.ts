@@ -21,7 +21,12 @@ export interface Body {
   br?: BarrierRole;
   /** 걷는 속도 (m/s, 직업별). 없으면 기본 속도 */
   v?: number;
+  /** 앉아 있는지 (키가 낮아지고 느려짐) */
+  k?: boolean;
 }
+
+/** 지금 몸의 키 (앉으면 낮아짐) */
+export const bodyHeight = (b: { k?: boolean }) => (b.k ? PHYS.CROUCH_HEIGHT : PHYS.PLAYER_HEIGHT);
 
 const EPS = 1e-4;
 const H = PHYS.PLAYER_HALF;
@@ -57,8 +62,8 @@ function overlapXY(x: number, y: number, b: { x0: number; y0: number; x1: number
 }
 
 /** 캐릭터 몸(z ~ z+키)과 상자가 수직으로 겹치는지 */
-function overlapZ(z: number, b: Box): boolean {
-  return z < b.z1 - EPS && z + PHYS.PLAYER_HEIGHT > b.z0 + EPS;
+function overlapZ(z: number, b: Box, h: number = PHYS.PLAYER_HEIGHT): boolean {
+  return z < b.z1 - EPS && z + h > b.z0 + EPS;
 }
 
 /** 이 위치가 속한 맵의 상자들 */
@@ -88,11 +93,18 @@ function moveAxis(b: Body, axis: "x" | "y", d: number) {
   let ny = axis === "y" ? b.y + d : b.y;
   const boxes = boxesAt(b.x);
   for (const box of boxes) {
-    if (!overlapXY(nx, ny, box) || !overlapZ(b.z, box)) continue;
+    if (!overlapXY(nx, ny, box) || !overlapZ(b.z, box, bodyHeight(b))) continue;
     const rise = box.z1 - b.z;
     // 서 있는 상태에서 낮은 턱이고 위가 비어 있으면 올라간다
     if (b.g && rise <= PHYS.STEP_HEIGHT && freeAt(nx, ny, box.z1)) {
       b.z = box.z1;
+      continue;
+    }
+    // 파쿠르: 점프 중 손이 닿는 턱이면 붙잡고 올라선다
+    if (!b.g && rise <= PHYS.MANTLE_REACH && freeAt(nx, ny, box.z1)) {
+      b.z = box.z1;
+      b.vz = 0;
+      b.g = true;
       continue;
     }
     // 막힘: 상자 면에 딱 붙인다
@@ -116,7 +128,7 @@ function moveAxis(b: Body, axis: "x" | "y", d: number) {
 function step(b: Body, dt: number) {
   if (b.a >= 0) {
     const v = DIRS[b.a]!;
-    const sp = b.v ?? PHYS.SPEED;
+    const sp = (b.v ?? PHYS.SPEED) * (b.k ? PHYS.CROUCH_SPEED : 1);
     moveAxis(b, "x", v[0] * sp * dt);
     moveAxis(b, "y", v[1] * sp * dt);
   }
@@ -125,8 +137,8 @@ function step(b: Body, dt: number) {
   b.vz -= PHYS.GRAVITY * dt;
   if (b.vz > 0) {
     for (const box of boxesAt(b.x)) {
-      if (overlapXY(b.x, b.y, box) && box.z0 >= b.z + PHYS.PLAYER_HEIGHT - EPS && nz + PHYS.PLAYER_HEIGHT > box.z0) {
-        nz = box.z0 - PHYS.PLAYER_HEIGHT;
+      if (overlapXY(b.x, b.y, box) && box.z0 >= b.z + bodyHeight(b) - EPS && nz + bodyHeight(b) > box.z0) {
+        nz = box.z0 - bodyHeight(b);
         b.vz = 0;
       }
     }
@@ -171,8 +183,20 @@ export function withAngle(b: Body, a: number, now: number): Body {
 export function withJump(b: Body, now: number): Body | null {
   const s = simulate(b, now);
   if (!s.g) return null;
+  delete s.k; // 앉아 있었으면 일어나며 뛴다
   s.vz = PHYS.JUMP_VELOCITY;
   s.g = false;
+  return s;
+}
+
+/**
+ * 지금까지 진행 후 앉기/일어서기.
+ * shortcut: 일어설 때 머리 위 천장을 확인하지 않음 (지금 맵에는 낮은 천장이 없음), 지붕 있는 통로를 만들면 확인 추가
+ */
+export function withCrouch(b: Body, on: boolean, now: number): Body {
+  const s = simulate(b, now);
+  if (on) s.k = true;
+  else delete s.k;
   return s;
 }
 
@@ -182,5 +206,6 @@ export function roundBody(b: Body): Body {
   const out: Body = { x: r(b.x), y: r(b.y), z: r(b.z), vz: r(b.vz), a: b.a, g: b.g, t: b.t };
   if (b.bu !== undefined && b.t < b.bu) { out.bu = b.bu; out.br = b.br; } // 결계가 끝났으면 뺀다
   if (b.v !== undefined) out.v = b.v;
+  if (b.k) out.k = true;
   return out;
 }

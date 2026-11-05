@@ -16,6 +16,7 @@ export class Input {
   private yawDelta = 0;
   private pitchDelta = 0;
   private jumpQueued = false;
+  private crouchQueued = false;
   private attackQueued = false;
   private touchAction = false;
 
@@ -31,7 +32,7 @@ export class Input {
     private touchLayer: HTMLElement,
     private stickBase: HTMLElement,
     private stickKnob: HTMLElement,
-    buttons: { jump: HTMLElement; attack: HTMLElement; action: HTMLElement },
+    buttons: { jump: HTMLElement; attack: HTMLElement; action: HTMLElement; crouch: HTMLElement },
   ) {
     touchLayer.addEventListener("pointerdown", (e) => this.onDown(e));
     touchLayer.addEventListener("pointermove", (e) => this.onMove(e));
@@ -39,17 +40,19 @@ export class Input {
     touchLayer.addEventListener("pointercancel", (e) => this.onUp(e));
 
     bindButton(buttons.jump, () => { if (this.enabled) this.jumpQueued = true; }, () => {});
+    bindButton(buttons.crouch, () => { if (this.enabled) this.crouchQueued = true; }, () => {});
     bindButton(buttons.attack, () => { if (this.enabled) this.attackQueued = true; }, () => {});
     // 행동 버튼: 손가락이 버튼 밖으로 미끄러져도 누른 상태 유지, 실제로 뗄 때만 해제
     bindButton(buttons.action, () => { this.touchAction = true; }, () => { this.touchAction = false; });
 
-    // 키보드 (개발/테스트용 보조 입력): WASD 이동, Space 점프, J 타격, K 행동, Tab 점수판, Q/E/방향키 카메라
+    // 키보드 (개발/테스트용 보조 입력): WASD 이동, Space 점프, C 앉기, J 타격, K 행동, Tab 점수판, Q/E/방향키 카메라
     window.addEventListener("keydown", (e) => {
       if ((e.target as HTMLElement).tagName === "INPUT") return;
       const k = e.key.toLowerCase();
       if (!e.repeat) {
         if (k === " " && this.enabled) this.jumpQueued = true;
         if (k === "j" && this.enabled) this.attackQueued = true;
+        if (k === "c" && this.enabled) this.crouchQueued = true;
         if (k === "tab") this.onToggleScoreboard();
       }
       this.keys.add(k);
@@ -78,6 +81,7 @@ export class Input {
     this.actionHeld = false;
     this.stickBase.style.display = "none";
     this.jumpQueued = false;
+    this.crouchQueued = false;
     this.attackQueued = false;
   }
 
@@ -97,6 +101,13 @@ export class Input {
     const tilt = (k.has("arrowup") ? 1 : 0) - (k.has("arrowdown") ? 1 : 0);
     this.yawDelta += rot * CONFIG.CAMERA_KEY_SPEED * dt;
     this.pitchDelta += tilt * CONFIG.CAMERA_KEY_SPEED * 0.5 * dt;
+  }
+
+  /** 앉기 버튼을 눌렀는지 (누를 때마다 앉기/일어서기 전환) */
+  consumeCrouch(): boolean {
+    const c = this.crouchQueued;
+    this.crouchQueued = false;
+    return c;
   }
 
   consumeJump(): boolean {

@@ -12,6 +12,10 @@
   <link rel="icon" href="./icon-192.png" />
   <link rel="apple-touch-icon" href="./icon-192.png" />
   <title>집 부수기 3D</title>
+  <!-- 디자인(Figma): IBM Plex Sans KR = 글자, IBM Plex Mono = 숫자 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="./src/style.css" />
 </head>
 <body>
@@ -27,7 +31,7 @@
       <button id="joinBtn">입장</button>
     </div>
     <div class="row">
-      <button id="hostBtn" class="secondary">📡 내 기기로 방 만들기</button>
+      <button id="hostBtn" class="secondary">내 기기로 방 만들기</button>
     </div>
     <p class="hint small">내 기기로 방을 만들면 이 기기가 게임 서버가 되고, 친구들이 이 기기에 직접 연결해요 (와이파이에서도 빨라요). 친구는 방 코드로 <b>입장</b>만 누르면 돼요.</p>
     <p id="joinError" class="error"></p>
@@ -50,13 +54,13 @@
       <section>
         <h3 class="sub">맵</h3>
         <div class="row" id="mapRow">
-          <button data-map="CLASSIC" class="secondary">🏠 기본 맵</button>
-          <button data-map="NEON" class="secondary">🌃 NEON DISTRICT</button>
+          <button data-map="CLASSIC" class="secondary">기본 맵</button>
+          <button data-map="NEON" class="secondary">NEON DISTRICT</button>
         </div>
         <p id="mapHint" class="hint small"></p>
         <h3 class="sub">혼자 연습</h3>
         <div class="row practice">
-          <button id="addBotsBtn" class="secondary">🤖 더미로 채우기</button>
+          <button id="addBotsBtn" class="secondary">더미로 채우기</button>
           <button id="removeBotsBtn" class="secondary hidden">더미 빼기</button>
           <button id="practiceBtn" class="secondary">연습 시작</button>
         </div>
@@ -101,8 +105,8 @@
       <div class="bar"><div id="workFill"></div><div id="workCheckpoint"></div></div>
     </div>
   </div>
-  <button id="scoreBtn" class="small hidden">점수판</button>
-  <button id="fullscreenBtn" class="small hidden">전체 화면</button>
+  <button id="scoreBtn" class="small iconBtn hidden" aria-label="점수판"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6H20M4 12H20M4 18H14"/></svg></button>
+  <button id="fullscreenBtn" class="small iconBtn hidden" aria-label="전체 화면"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4H9M15 4H20V9M20 15V20H15M9 20H4V15"/></svg></button>
   <div id="netStatus"></div>
   <div id="teamPanelMine" class="teamPanel left hidden"></div>
   <div id="teamPanelEnemy" class="teamPanel right hidden"></div>
@@ -129,12 +133,14 @@
   <!-- 터치 조작 (왼손 = 이동, 오른손 = 행동) -->
   <div id="touch" class="hidden">
     <div id="stickBase"><div id="stickKnob"></div></div>
+    <!-- 엄지 버튼 (Figma TouchButton): 아래 줄 앉기·점프·타격, 타격 위 행동 -->
     <div id="buttons">
-      <div id="jumpBtn" class="gameBtn"><span>점프</span></div>
-      <div id="attackBtn" class="gameBtn"><span id="attackLabel">타격</span><div id="attackCd"></div></div>
-      <div id="actionBtn" class="gameBtn disabled">
+      <div id="crouchBtn" class="gameBtn sm" aria-label="앉기"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3V14"/><path d="M6.5 8.5L12 14L17.5 8.5"/><path d="M5 18H19"/><path d="M5 21H19"/></svg></div>
+      <div id="jumpBtn" class="gameBtn sm" aria-label="점프"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 18V5"/><path d="M6.5 10.5L12 5L17.5 10.5"/><path d="M5 21H19"/></svg></div>
+      <div id="attackBtn" class="gameBtn" aria-label="타격"><svg class="ic" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 17.5L3 6V3H6L17.5 14.5"/><path d="M13 19L19 13"/><path d="M16 16L20 20"/><path d="M19 21L21 19"/></svg><span id="attackLabel">타격</span><div id="attackCd"></div></div>
+      <div id="actionBtn" class="gameBtn disabled" aria-label="행동">
         <svg class="ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" /><circle id="actionRing" cx="50" cy="50" r="46" /></svg>
-        <span id="actionLabel">행동</span>
+        <svg class="ic" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4L20 10"/><path d="M11.5 6.5L17.5 12.5L15 15L9 9Z"/><path d="M10.5 13.5L4 20"/></svg><span id="actionLabel">행동</span>
       </div>
     </div>
   </div>
@@ -159,7 +165,7 @@
   <div id="toast" class="hidden"></div>
 
   <!-- 세로 화면 안내 / 재접속 -->
-  <div id="rotate" class="cover"><div>📱↻<br />가로로 돌려주세요</div></div>
+  <div id="rotate" class="cover"><div>가로로 돌려주세요</div></div>
   <div id="reconnecting" class="cover dim hidden"><div>재접속 중...<br /><small id="reconnectInfo"></small><br /><button id="giveUpBtn" class="secondary">처음 화면으로</button></div></div>
 
   <script type="module" src="./src/main.ts"></script>

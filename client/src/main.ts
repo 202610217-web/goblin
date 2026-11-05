@@ -1,5 +1,5 @@
 // 게임 진입점: 입장 → 로비 → 게임 화면 (이동/점프/타격/집 작업/치유/관전) → 라운드/경기 종료
-import { type Body, angleToRad, groundHeightAt, makeBody, radToAngle, simulate, withAngle, withJump } from "../../shared/sim";
+import { type Body, angleToRad, groundHeightAt, makeBody, radToAngle, simulate, withAngle, withCrouch, withJump } from "../../shared/sim";
 import { HOUSES, MAPS, PHYS, SITES, SPAWNS, type SiteId, type TeamId, isNearHouse, isNearSite } from "../../shared/world";
 import { Minimap } from "./minimap";
 import { setHighQuality } from "./graphics";
@@ -49,7 +49,7 @@ interface Actor {
 }
 
 const world = new World3D($("stage"));
-const input = new Input($("touch"), $("stickBase"), $("stickKnob"), { jump: $("jumpBtn"), attack: $("attackBtn"), action: $("actionBtn") });
+const input = new Input($("touch"), $("stickBase"), $("stickKnob"), { jump: $("jumpBtn"), attack: $("attackBtn"), action: $("actionBtn"), crouch: $("crouchBtn") });
 const net = new Net(SERVER_URL);
 
 let myId: string | null = null;
@@ -231,7 +231,13 @@ document.querySelectorAll<HTMLButtonElement>("[data-map]").forEach((b) => {
   b.onclick = () => net.send({ t: "set_map", map: b.dataset.map });
 });
 // 직업 카드: 수치는 CLASSES 한 곳에서 (체력·사거리·속도 막대, 가장 큰 값 기준)
-const CLASS_ICON: Record<string, string> = { KNIGHT: "⚔️", ARCHER: "🏹", JAVELIN: "🔱" };
+// 직업 아이콘: 선 아이콘 (Figma 터치 버튼과 같은 굵기)
+const svgIcon = (d: string) => `<svg class="ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const CLASS_ICON: Record<string, string> = {
+  KNIGHT: svgIcon('<path d="M14.5 17.5L3 6V3H6L17.5 14.5"/><path d="M13 19L19 13"/><path d="M16 16L20 20"/><path d="M19 21L21 19"/>'),
+  ARCHER: svgIcon('<path d="M6 3C14 6 14 18 6 21"/><path d="M6 3V21"/><path d="M6 12H20"/><path d="M17 9L20 12L17 15"/>'),
+  JAVELIN: svgIcon('<path d="M4 20L17 7"/><path d="M14 4H20V10"/><path d="M14 4L20 10"/>'),
+};
 const CLASS_DESC: Record<string, string> = { KNIGHT: "검과 방패 · 근접 · 빠른 발", ARCHER: "활 · 빠른 화살", JAVELIN: "창 · 느리지만 강한 한 방" };
 document.querySelectorAll<HTMLButtonElement>("[data-cls]").forEach((b) => {
   const c = CLASSES[b.dataset.cls as keyof typeof CLASSES];
@@ -386,7 +392,7 @@ function announceStates(prev: RoomStateMessage, next: RoomStateMessage) {
     const before = prev.players.find((x) => x.id === p.id)?.combat.state;
     const now = p.combat.state;
     if (before === now || !before) continue;
-    if (now === "DOWNED") feed($("feed"), `${name(lastHitBy.get(p.id))} ⚔ ${name(p.id)} 기절`, "down");
+    if (now === "DOWNED") feed($("feed"), `${name(lastHitBy.get(p.id))} → ${name(p.id)} 기절`, "down");
     else if (now === "DEAD") feed($("feed"), `${name(p.id)} 사망`, "dead");
     else if (before === "DOWNED" && now === "NORMAL") feed($("feed"), `${name(p.id)} 부활`, "up");
   }
@@ -424,7 +430,7 @@ function applyRoomState(s: RoomStateMessage) {
     }
     a.info = p;
     a.view.setWeapon(p.cls);
-    a.view.setNickname(p.id === myId ? `${p.nickname} (나)` : `${p.bot ? "🤖 " : ""}${p.nickname}`);
+    a.view.setNickname(p.id === myId ? `${p.nickname} (나)` : `${p.bot ? "[봇] " : ""}${p.nickname}`);
     if (p.id !== myId) {
       if (p.body.t >= a.serverT) { a.serverT = p.body.t; reconcile(a, p.body, false); }
     }
@@ -602,7 +608,10 @@ function renderLobby() {
     const box = $(`team${t}`);
     box.replaceChildren(...room.players.filter((p) => p.team === t).map((p) => {
       const d = document.createElement("div");
-      d.textContent = `${p.owner ? "👑 " : ""}${p.bot ? "🤖 " : ""}${p.nickname}${p.ready ? " ✔" : ""}${p.conn === "RECONNECTING" ? " (재접속 중)" : ""}`;
+      // 이름 + 작은 글자 태그 (방장 / 봇 / 준비 / 재접속)
+      const tags = [p.owner && "방장", p.bot && "봇", p.ready && "준비", p.conn === "RECONNECTING" && "재접속 중"].filter(Boolean) as string[];
+      d.innerHTML = `<span class="pn"></span>${tags.map((t) => `<i class="tag${t === "준비" ? " ok" : ""}">${t}</i>`).join("")}`;
+      (d.firstChild as HTMLElement).textContent = p.nickname;
       if (p.id === myId) d.className = "me";
       if (p.ready) d.classList.add("ready");
       return d;
@@ -611,9 +620,9 @@ function renderLobby() {
   // 연결 방식 안내
   const notice = $("connNotice");
   if (net.mode === "host") {
-    notice.textContent = "📡 이 기기가 방 서버예요. 게임 중에 화면을 끄거나 다른 앱으로 가면 모두 멈춰요. 친구는 방 코드로 입장하면 돼요.";
+    notice.textContent = "이 기기가 방 서버예요. 게임 중에 화면을 끄거나 다른 앱으로 가면 모두 멈춰요. 친구는 방 코드로 입장하면 돼요.";
   } else if (net.mode === "p2p") {
-    notice.textContent = `📡 호스트 기기에 연결됨 (${net.label})`;
+    notice.textContent = `호스트 기기에 연결됨 (${net.label})`;
   } else notice.textContent = "";
   notice.classList.toggle("hidden", !notice.textContent);
   const bots = room.players.filter((p) => p.bot).length;
@@ -705,11 +714,16 @@ function renderHud(now: number) {
           ? (atk ? `${broken} 수리 막기` : `${broken} 건물 고치기`)
           : prep ? (atk ? "결계가 풀리면 출발" : "A·B로 가서 자리 잡기") : (atk ? "A 또는 B 부수기" : "A·B 지키기")
         : room.phase === "REPAIR" ? (atk ? "수리 막기" : "집 고치기") : (atk ? `${enemy}팀 집 부수기` : "우리 집 지키기");
-      setText("hudRole", `${atk ? "⚔ 공격" : "🛡 수비"} · ${goal}`);
+      const roleEl = $("hudRole"), roleKey = `${atk}|${goal}`;
+      if (roleEl.dataset.k !== roleKey) { // 바뀔 때만 다시 그림 (매 프레임 DOM 만들지 않기)
+        roleEl.dataset.k = roleKey;
+        roleEl.innerHTML = `<b>${atk ? "공격" : "수비"}</b><span></span>`;
+        (roleEl.lastChild as HTMLElement).textContent = goal;
+      }
       $("hudRole").className = atk ? "atk" : "def";
     }
     const bad = !net.connected || net.unstable || net.rtt > CONFIG.PING_WARN_MS;
-    setText("netStatus", net.connected ? `${bad ? "⚠ 불안정 · " : ""}ping ${Math.round(net.rtt)}ms${route ? " · " + route : ""} · ${Math.round(fps)}fps` : "⚠ 연결 끊김");
+    setText("netStatus", net.connected ? `${bad ? "불안정 · " : ""}ping ${Math.round(net.rtt)}ms${route ? " · " + route : ""} · ${Math.round(fps)}fps` : "연결 끊김");
     $("netStatus").classList.toggle("bad", bad);
   }
   // 점수, 매치포인트, 듀스, 라운드 기록
@@ -864,7 +878,7 @@ function renderEndScreens() {
       setText("matchSub", "플레이어가 나가서 경기가 끝났어요. 다시 하기를 누르면 로비로 돌아가요.");
     } else {
       const won = room.matchWinner === mine.team;
-      setText("matchTitle", won ? `🏆 ${mine.team}팀 승리!` : `${room.matchWinner}팀 승리`);
+      setText("matchTitle", won ? `${mine.team}팀 승리` : `${room.matchWinner}팀 승리`);
       setText("matchSub", won ? "축하해요! 다시 하기를 누르면 로비로 돌아가요." : "아쉬워요. 다시 하기를 누르면 로비로 돌아가요.");
     }
     setText("matchScore", `A ${room.score.A} : ${room.score.B} B`);
@@ -1025,6 +1039,15 @@ function frame() {
         lastSentSeq = seq;
       }
     }
+    // 4-1) 앉기/일어서기 전환 (점프와 같은 방식: 바로 보여 주고 서버에 같은 시각으로)
+    if (input.consumeCrouch() && canWalk() && myNormal()) {
+      const on = !m.body.k;
+      m.body = withCrouch(m.body, on, now);
+      net.send({ t: "crouch", on, s: ++seq, at: now });
+      sentAt.set(seq, t);
+      lastSentSeq = seq;
+    }
+    $("crouchBtn").classList.toggle("on", !!m.body.k);
     // 5) 타격 (1회 = 메시지 1개). 판정은 서버가 같은 조준 광선으로 한다
     if (input.consumeAttack()) attackBufferedUntil = now + CONFIG.ATTACK_BUFFER_MS;
     if (now <= attackBufferedUntil) {
@@ -1043,6 +1066,7 @@ function frame() {
     }
   } else {
     input.consumeJump();
+    input.consumeCrouch();
     input.consumeAttack();
   }
 
@@ -1058,7 +1082,7 @@ function frame() {
     const x = a.body.x + a.off.x, y = a.body.y + a.off.y, z = Math.max(0, a.body.z + a.off.z);
     const c = a.info.combat;
     const state = c.state === "NORMAL" ? 0 : c.state === "DOWNED" ? 1 : 2;
-    a.view.update(x, y, z, a.face, groundHeightAt(x, y, z), state, now < c.invulnUntil, a.info.conn === "RECONNECTING", t);
+    a.view.update(x, y, z, a.face, groundHeightAt(x, y, z), state, now < c.invulnUntil, a.info.conn === "RECONNECTING", t, !!a.body.k);
     a.view.setStatus(c.hp / classOf(a.info).maxHp, inGame() ? statusText(a.info, now) : "");
     if (a === watch) {
       world.ranged = classOf(a.info).ranged;

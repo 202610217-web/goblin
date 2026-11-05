@@ -54,6 +54,12 @@ describe("화살 비행 판정", () => {
   it("12m 밖은 닿지 않는다", () => {
     expect(fly(flat(30, 2), [enemy(makeBody(23, 2, 0))]).id).toBeNull();
   });
+  it("앉은 상대는 머리 높이(1.4m) 화살에 안 맞는다", () => {
+    const high = flat(20, 2, 1.4);
+    const highArrow = { ...high, origin: { ...high.origin, z: 1.4 } };
+    expect(fly(highArrow, [enemy(makeBody(20, 2, 0))]).id).toBe("e");
+    expect(fly(highArrow, [enemy({ ...makeBody(20, 2, 0), k: true })]).id).toBeNull();
+  });
   it("창던지기병의 창: 더 느리고(22m/s) 더 멀리(16m) 날아간다", () => {
     const jav = makeArrow(makeBody(10, 2, 0), 0, 0.1, 0, CLASSES.JAVELIN.proj);
     expect(jav).toMatchObject({ speed: 22, range: 16 });

@@ -2,7 +2,7 @@
 // 날아가는 동안 상대가 움직이면 빗나가므로 멀리 있는 상대는 앞을 보고 쏴야 한다 (리드샷).
 import { AIM, type Vec3, aimRay, rayAabb } from "./aim";
 import { CLASSES, type Projectile } from "./classes";
-import { type Body, simulate } from "./sim";
+import { type Body, bodyHeight, simulate } from "./sim";
 import { BOXES, PHYS } from "./world";
 
 export interface Arrow {
@@ -17,7 +17,7 @@ export interface Arrow {
 }
 
 /** 화살이 나가는 높이 (발 기준, 가슴께) */
-const CHEST = 1.2;
+const CHEST = 1.2, CHEST_CROUCH = 0.8;
 
 /** 광선이 처음 닿는 벽/상자/땅까지 거리 (없으면 Infinity) */
 export function firstSolid(o: Vec3, d: Vec3, tMin: number): number {
@@ -34,7 +34,7 @@ export function firstSolid(o: Vec3, d: Vec3, tMin: number): number {
  * 몸 가슴 높이에서 쏜다 (몸에서 그냥 정면으로 쏘면 화면 가운데 조준점과 어긋나기 때문).
  */
 export function makeArrow(shooter: Body, yaw: number, pitch: number, at: number, proj: Projectile = CLASSES.ARCHER.proj!): Arrow {
-  const origin = { x: shooter.x, y: shooter.y, z: shooter.z + CHEST };
+  const origin = { x: shooter.x, y: shooter.y, z: shooter.z + (shooter.k ? CHEST_CROUCH : CHEST) };
   const ray = aimRay(shooter, yaw, pitch, true);
   const o = ray.origin, d = ray.dir;
   // 광선 위에서 쏜 사람과의 수평 거리가 MAX_RANGE가 되는 지점 (2차 방정식의 큰 근)
@@ -66,7 +66,7 @@ export function arrowSegmentHit<T extends { id: string; body: Body }>(
   let bestT = Infinity;
   for (const c of candidates) {
     const b = simulate(c.body, toT);
-    const t = rayAabb(arrow.origin, arrow.dir, { x: b.x - H, y: b.y - H, z: b.z }, { x: b.x + H, y: b.y + H, z: b.z + PHYS.PLAYER_HEIGHT });
+    const t = rayAabb(arrow.origin, arrow.dir, { x: b.x - H, y: b.y - H, z: b.z }, { x: b.x + H, y: b.y + H, z: b.z + bodyHeight(b) }); // 앉으면 낮은 상자
     if (t === null || t < dFrom || t > end || t >= bestT) continue;
     hit = c;
     bestT = t;
