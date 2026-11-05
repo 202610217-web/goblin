@@ -307,7 +307,7 @@ net.onMessage = (m) => {
       onMove(m.id, m.body, m.s);
       break;
     case "swing":
-      onSwing(m.by, m.target);
+      onSwing(m.by, m.target, m.damage);
       break;
     case "shot":
       onShot(m as Extract<ServerMessage, { t: "shot" }>);
@@ -442,12 +442,12 @@ function onShot(m: Extract<ServerMessage, { t: "shot" }>) {
 /** 마지막으로 그 사람을 때린 사람 (처치 알림용) */
 const lastHitBy = new Map<string, string>();
 
-function onSwing(by: string, target: string | null) {
+function onSwing(by: string, target: string | null, damage: number) {
   const t = performance.now();
   if (target) {
     lastHitBy.set(target, by);
     const victim = actors.get(target);
-    if (victim) damageNumber(victim.view.label, classOf(actors.get(by)?.info).damage);
+    if (victim) damageNumber(victim.view.label, damage); // 서버가 계산한 값 (고블린 뒤치기는 1.5배)
     if (by === myId) hitMarker($("crosshair"));
     const m = me(), atk = actors.get(by);
     if (target === myId && m && atk) {

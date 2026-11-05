@@ -649,7 +649,7 @@ export class GameRoom extends DurableObject<Env> {
         this.refreshMotion(target, now); // 죽으면 그 자리에 멈춤
       }
     }
-    this.broadcast({ t: "swing", by, target: target?.id ?? null, serverTime: now });
+    this.broadcast({ t: "swing", by, target: target?.id ?? null, serverTime: now, damage: target ? damage : 0 });
     const winner = killWinner(st.score);
     if (winner) this.endMatch(winner, "score", now);
   }
