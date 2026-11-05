@@ -1,0 +1,2 @@
+이 폴더의 재질 사진과 3D 모델은 Poly Haven(https://polyhaven.com)의 CC0(퍼블릭 도메인) 자원입니다.
+tools/fetch_polyhaven.py 로 받아 휴대폰용으로 크기만 줄였습니다.

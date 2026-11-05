@@ -2,6 +2,7 @@
 import { type Body, angleToRad, groundHeightAt, makeBody, radToAngle, simulate, withAngle, withJump } from "../../shared/sim";
 import { HOUSES, MAPS, PHYS, SITES, SPAWNS, type SiteId, type TeamId, isNearHouse, isNearSite } from "../../shared/world";
 import { Minimap } from "./minimap";
+import { setHighQuality } from "./graphics";
 import { AIM, findAimTarget, inReach } from "../../shared/aim";
 // 서버와 같은 메시지 형식/규칙 수치를 그대로 쓴다 (타입은 빌드 때 지워진다)
 import type { Phase, PublicPlayer, RoomStateMessage, RoundEndReason, ServerMessage, WorkInfo } from "../../server/src/protocol";
@@ -216,6 +217,10 @@ const vib = $<HTMLInputElement>("vibrateToggle");
 vib.checked = vibrationEnabled();
 vib.onchange = () => { setVibration(vib.checked); if (vib.checked) vibrate(CONFIG.VIBRATE_HIT); };
 $("giveUpBtn").onclick = () => goToJoin("");
+// 고화질 그래픽 (기본: 컴퓨터 켬, 폰·패드 끔. 기기에 저장)
+const gfx = $<HTMLInputElement>("gfxToggle");
+gfx.checked = world.light.high;
+gfx.onchange = () => { setHighQuality(gfx.checked); world.light.setQuality(gfx.checked); };
 // 혼자 연습: 빈자리를 더미로 채우기 / 빼기 / 인원이 모자라도 바로 시작
 $("addBotsBtn").onclick = () => net.send({ t: "add_bots" });
 $("removeBotsBtn").onclick = () => net.send({ t: "remove_bots" });
