@@ -58,6 +58,14 @@ export class Input {
     window.addEventListener("keyup", (e) => this.keys.delete(e.key.toLowerCase()));
     window.addEventListener("blur", () => this.reset());
     window.addEventListener("contextmenu", (e) => e.preventDefault());
+    // iOS Safari는 user-scalable=no·touch-action:none을 무시해서, 버튼을 빠르게 두 번 누르거나 두 손가락이면 화면이 확대된다
+    document.addEventListener("gesturestart", (e) => e.preventDefault());
+    let lastTouchEnd = 0;
+    document.addEventListener("touchend", (e) => {
+      const now = e.timeStamp;
+      if (now - lastTouchEnd < 350 && !(e.target instanceof HTMLInputElement)) e.preventDefault();
+      lastTouchEnd = now;
+    }, { passive: false });
   }
 
   /** 입력 모두 해제 (백그라운드 전환 등) */

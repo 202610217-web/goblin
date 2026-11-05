@@ -988,7 +988,10 @@ function frame() {
     const state = c.state === "NORMAL" ? 0 : c.state === "DOWNED" ? 1 : 2;
     a.view.update(x, y, z, a.face, groundHeightAt(x, y, z), state, now < c.invulnUntil, a.info.conn === "RECONNECTING", t);
     a.view.setStatus(c.hp / classOf(a.info).maxHp, inGame() ? statusText(a.info, now) : "");
-    if (a === watch) a.view.nearCamera = world.updateCamera(x, y, z, dt) < CONFIG.CAMERA_FADE_RATIO;
+    if (a === watch) {
+      world.ranged = classOf(a.info).ranged;
+      a.view.nearCamera = world.updateCamera(x, y, z, dt) < CONFIG.CAMERA_FADE_RATIO;
+    }
     else a.view.nearCamera = false;
     if (m && a.team !== m.team && c.state === "NORMAL" && now >= c.invulnUntil) enemyBuf.push(a);
   }

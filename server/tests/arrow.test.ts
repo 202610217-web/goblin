@@ -60,7 +60,7 @@ describe("화살 비행 판정", () => {
     expect(a.at).toBe(500);
     expect(Math.hypot(a.dir.x, a.dir.y, a.dir.z)).toBeCloseTo(1, 6);
     // 화살 방향의 11m 앞 지점이 조준 광선과 거의 겹친다 (어깨 카메라 보정)
-    const { origin, dir } = aimRay(me, 0, 0.1);
+    const { origin, dir } = aimRay(me, 0, 0.1, true);
     const p = { x: a.origin.x + a.dir.x * 11, y: a.origin.y + a.dir.y * 11, z: a.origin.z + a.dir.z * 11 };
     const t = (p.x - origin.x) * dir.x + (p.y - origin.y) * dir.y + (p.z - origin.z) * dir.z;
     const dist = Math.hypot(origin.x + dir.x * t - p.x, origin.y + dir.y * t - p.y, origin.z + dir.z * t - p.z);

@@ -28,6 +28,19 @@ describe("타격 대상 판정", () => {
   it("조준점에서 옆으로 벗어난 적은 안 맞는다", () => {
     expect(findAimTarget(me, 0, P, [enemy(11.5, 3.5)])).toBeNull();
   });
+  it("기사는 조준 방향 양옆 30도 안의 적을 맞힌다", () => {
+    const at = (deg: number) => enemy(10 + 1.5 * Math.cos((deg * Math.PI) / 180), 2 + 1.5 * Math.sin((deg * Math.PI) / 180));
+    expect(findAimTarget(me, 0, P, [at(28)])).not.toBeNull();
+    expect(findAimTarget(me, 0, P, [at(-28)])).not.toBeNull();
+    expect(findAimTarget(me, 0, P, [at(32)])).toBeNull();
+    expect(findAimTarget(me, 0, P, [at(-32)])).toBeNull();
+    // 여럿이면 조준 방향에 더 가까운 사람
+    expect(findAimTarget(me, 0, P, [at(25), at(10)])?.id).toBe(at(10).id);
+  });
+  it("올려다보거나 내려다봐도(pitch) 근접 판정은 같다", () => {
+    expect(findAimTarget(me, 0, AIM.PITCH_MIN, [enemy(11.5, 2)])?.id).toBe("11.5,2");
+    expect(findAimTarget(me, 0, AIM.PITCH_MAX, [enemy(11.5, 2)])?.id).toBe("11.5,2");
+  });
   it("여러 명이면 조준점에 먼저 걸리는 사람", () => {
     expect(findAimTarget(me, 0, P, [enemy(11.9, 2), enemy(11.2, 2)])?.id).toBe("11.2,2");
   });

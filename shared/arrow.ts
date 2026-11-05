@@ -32,7 +32,7 @@ export function firstSolid(o: Vec3, d: Vec3, tMin: number): number {
  */
 export function makeArrow(shooter: Body, yaw: number, pitch: number, at: number): Arrow {
   const origin = { x: shooter.x, y: shooter.y, z: shooter.z + CHEST };
-  const ray = aimRay(shooter, yaw, pitch);
+  const ray = aimRay(shooter, yaw, pitch, true);
   const o = ray.origin, d = ray.dir;
   // 광선 위에서 쏜 사람과의 수평 거리가 MAX_RANGE가 되는 지점 (2차 방정식의 큰 근)
   const px = o.x - shooter.x, py = o.y - shooter.y;

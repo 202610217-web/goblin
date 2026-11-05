@@ -3,7 +3,7 @@
 import * as THREE from "three";
 import { BARRIERS, BARRIER_HEIGHT, BOXES, BOXES_BY_MAP, type Box, HOUSES, MAPS, type MapId, PHYS, type TeamId, mapAt } from "../../shared/world";
 import { NEON_GRID, NEON_ZONES, cellCenter } from "../../shared/neon";
-import { AIM, type Vec3, aimRay, clampPitch, rayAabb } from "../../shared/aim";
+import { AIM, type Vec3, aimConverge, aimRay, clampPitch, rayAabb } from "../../shared/aim";
 import type { Body } from "../../shared/sim";
 import { ARROW, type ClassId } from "../../shared/classes";
 import { firstSolid } from "../../shared/arrow";
@@ -226,6 +226,8 @@ export class World3D {
 
   /** 지금 카메라 거리 비율 (1 = 기본 거리, 벽에 가리면 작아짐) */
   camK = 1;
+  /** 보는 캐릭터가 궁수면 궁수용 어깨 시점 (서버 화살 판정과 같은 광선) */
+  ranged = false;
 
   /**
    * 3인칭 카메라: 오른쪽 어깨 뒤 위에서 바라본다.
@@ -236,7 +238,7 @@ export class World3D {
    */
   updateCamera(x: number, y: number, z: number, dt = 0): number {
     this.pitch = clampPitch(this.pitch);
-    const { origin } = aimRay({ x, y, z } as Body, this.yaw, this.pitch);
+    const { origin } = aimRay({ x, y, z } as Body, this.yaw, this.pitch, this.ranged);
     const head = { x, y, z: z + AIM.CAMERA_TARGET_HEIGHT };
     const d = { x: origin.x - head.x, y: origin.y - head.y, z: origin.z - head.z };
     const len = Math.hypot(d.x, d.y, d.z);
@@ -245,7 +247,7 @@ export class World3D {
     else this.camK += (want - this.camK) * (1 - Math.exp(-dt / CONFIG.CAMERA_EASE_OUT_S)); // 돌아갈 때는 부드럽게
     World3D.toThree(head.x + d.x * this.camK, head.y + d.y * this.camK, head.z + d.z * this.camK, this.camera.position);
     // 조준 지점 = 머리에서 정면(카메라 방향)으로 AIM_CONVERGE 앞
-    const p = this.pitch, c = AIM.AIM_CONVERGE;
+    const p = this.pitch, c = aimConverge(this.ranged);
     this.camera.lookAt(World3D.toThree(
       x + Math.cos(this.yaw) * Math.cos(p) * c,
       y + Math.sin(this.yaw) * Math.cos(p) * c,
@@ -262,6 +264,8 @@ export class World3D {
       const t = rayAabb(head, d, { x: b.x0 - pad, y: b.y0 - pad, z: b.z0 - pad }, { x: b.x1 + pad, y: b.y1 + pad, z: top + pad });
       if (t !== null && t < k) k = t;
     }
+    // 올려다볼 때 땅속으로 들어가지 않게 (땅 위 0.3m에서 멈춤)
+    if (d.z < 0 && head.z + d.z < 0.3) k = Math.min(k, (0.3 - head.z) / d.z);
     // 맵 밖 울타리 너머로도 나가지 않게
     const bx = head.x + d.x, by = head.y + d.y;
     const mb = MAPS[mapAt(head.x)];
