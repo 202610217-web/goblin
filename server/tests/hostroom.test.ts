@@ -136,7 +136,7 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     host.stop();
   });
 
-  it("궁극기: 준 피해 1당 0.5% 차고, 100%면 앞쪽 4m 안 적에게 50 데미지 + ult 방송, 쓰면 0%", async () => {
+  it("궁극기: 준 피해 1당 0.5% 차고, 100%면 앞쪽 4m 안 적에게 70 데미지 + ult 방송, 쓰면 0%", async () => {
     const host = new HostRoom("ULTI", { DEBUG_COMMANDS: "true" });
     const a = fakePeer(), b = fakePeer();
     host.addPeer(a, "HOST"); host.addPeer(b, "P2P");
@@ -159,8 +159,8 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     const hp0 = me(bId).combat.hp;
     a.push({ t: "ult", yaw: 0 }); await tick(5);
     expect(last(b, "ult")).toMatchObject({ by: aId, target: bId });
-    expect(last(a, "swing")).toMatchObject({ target: bId, damage: 50 });
-    expect(me(bId).combat.hp).toBe(hp0 - 50);
+    expect(last(a, "swing")).toMatchObject({ target: bId, damage: 70 });
+    expect(me(bId).combat.hp).toBe(hp0 - 70);
     expect(me(aId).combat.ult).toBe(0); // 궁극기 피해로는 다시 안 참
     host.stop();
   });

@@ -63,7 +63,7 @@ export const ULTS: Partial<Record<ClassId, {
   name: string; kind: "sword" | "rain" | "spear" | "smoke"; damage: number; range: number;
   radius?: number; delayMs?: number; speed?: number; slowMs?: number; slowMul?: number; durationMs?: number;
 }>> = {
-  KNIGHT: { name: "하늘 검", kind: "sword", damage: 50, range: 4 },
+  KNIGHT: { name: "하늘 검", kind: "sword", damage: 70, range: 4 },
   ARCHER: { name: "화살비", kind: "rain", damage: 30, range: 20, radius: 3, delayMs: 1_000 },
   JAVELIN: { name: "거대 창", kind: "spear", damage: 70, range: 25, speed: 26, slowMs: 1_000, slowMul: 0.2 },
   GOBLIN: { name: "연막탄", kind: "smoke", damage: 0, range: 0, radius: 4, durationMs: 6_000 },
