@@ -1,0 +1,2 @@
+무기 모델(화살·단검): KayKit Adventurers Character Pack 1.0 — Kay Lousberg (www.kaylousberg.com)
+License: Creative Commons Zero (CC0). 원본 Assets/gltf 그대로.

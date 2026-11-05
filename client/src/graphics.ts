@@ -76,6 +76,41 @@ export function groundGeo(w: number, h: number, tile: number): THREE.PlaneGeomet
   return g;
 }
 
+// ---------- 건물 창문 (그려서 만드는 무늬, 받을 파일 없음) ----------
+/** 창문 8×8칸 무늬 한 장: 창틀·유리(map, 창문 밖은 투명) + 불 켜진 창(emissiveMap). 창문 1칸 = WINDOW m */
+export const WINDOW = { W: 3, H: 3, N: 8 } as const;
+let windowTex: { map: THREE.CanvasTexture; lit: THREE.CanvasTexture } | null = null;
+export function windowMat(glow: number): THREE.MeshStandardMaterial {
+  if (!windowTex) {
+    const px = 64, n = WINDOW.N;
+    const mk = () => { const c = document.createElement("canvas"); c.width = c.height = px * n; return [c, c.getContext("2d")!] as const; };
+    const [mc, m] = mk(), [lc, l] = mk();
+    l.fillStyle = "#000"; l.fillRect(0, 0, px * n, px * n);
+    let seed = 7;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647; // 매번 같은 배치
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      const x = i * px, y = j * px;
+      m.fillStyle = "#3b3f46"; m.fillRect(x + 12, y + 10, 40, 46); // 창틀
+      m.fillStyle = "#5d7488"; m.fillRect(x + 15, y + 13, 34, 40); // 유리
+      m.fillStyle = "#3b3f46"; m.fillRect(x + 31, y + 13, 2, 40); // 가운데 살
+      const r = rnd();
+      if (r < 0.4) { l.fillStyle = r < 0.15 ? "#9fd0ff" : "#ffcf8a"; l.fillRect(x + 15, y + 13, 34, 40); }
+    }
+    const tex = (c: HTMLCanvasElement, color: boolean) => {
+      const t = new THREE.CanvasTexture(c);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = 4;
+      if (color) t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+    windowTex = { map: tex(mc, true), lit: tex(lc, true) };
+  }
+  return new THREE.MeshStandardMaterial({
+    map: windowTex.map, alphaTest: 0.5, emissiveMap: windowTex.lit, emissive: 0xffffff, emissiveIntensity: glow,
+    roughness: 0.15, metalness: 0.5,
+  });
+}
+
 // ---------- 모델 (Poly Haven glTF) ----------
 const models = new Map<string, Promise<THREE.Object3D>>();
 /** 모델을 한 번만 받아 두고, 부를 때마다 복제본을 준다 (그림자 켬) */
@@ -106,8 +141,8 @@ export function fitTo(o: THREE.Object3D, sx: number, sy: number, sz: number) {
 // ---------- 하늘·해·그림자·블룸 ----------
 /** 맵별 시간대: 기본 맵 = 맑은 오후, NEON = 해 질 녘(네온이 빛나 보이게) */
 const LIGHTING: Record<MapId, { elevation: number; azimuth: number; turbidity: number; rayleigh: number; exposure: number; sun: number; sunColor: number; fog: number; fogDensity: number; env: number; hemi: number }> = {
-  CLASSIC: { elevation: 38, azimuth: 210, turbidity: 4, rayleigh: 1.2, exposure: 0.55, sun: 3.2, sunColor: 0xfff1de, fog: 0xc3d3e3, fogDensity: 0.006, env: 0.2, hemi: 0.25 },
-  NEON: { elevation: 13, azimuth: 250, turbidity: 8, rayleigh: 2.2, exposure: 0.5, sun: 3, sunColor: 0xffc08a, fog: 0x9a8088, fogDensity: 0.009, env: 0.35, hemi: 0.9 },
+  CLASSIC: { elevation: 38, azimuth: 210, turbidity: 4, rayleigh: 1.2, exposure: 0.55, sun: 3.2, sunColor: 0xfff1de, fog: 0xc3d3e3, fogDensity: 0.006, env: 0.45, hemi: 0.7 },
+  NEON: { elevation: 13, azimuth: 250, turbidity: 8, rayleigh: 2.2, exposure: 0.5, sun: 3, sunColor: 0xffc08a, fog: 0x9a8088, fogDensity: 0.009, env: 0.8, hemi: 1.3 },
 };
 
 export class Lighting {
@@ -186,7 +221,7 @@ export class Lighting {
     this.envRT?.dispose();
     this.envRT = this.pmrem.fromScene(this.envScene);
     this.scene.environment = this.envRT.texture;
-    // 물리 하늘은 실제 밝기 단위라 매우 밝다 → 환경광은 조금만
+    // 물리 하늘은 실제 밝기 단위라 매우 밝다 → 환경광은 조금만 (그래도 그늘진 벽이 새까맣지 않을 만큼)
     this.scene.environmentIntensity = L.env;
     this.hemi.intensity = L.hemi;
   }

@@ -20,11 +20,11 @@ import {
   SPAWNS,
   FIRST_ATTACKING_TEAM,
 } from "./constants";
-import { type Body, groundHeightAt, makeBody, roundBody, simulate, withAngle, withCrouch, withJump } from "../../shared/sim";
+import { type Body, angleToRad, groundHeightAt, makeBody, roundBody, simulate, withAngle, withCrouch, withJump } from "../../shared/sim";
 import { type BarrierRole, MAPS, PHYS, type SiteId, isNearHouse, isNearSite } from "../../shared/world";
 import { NEON_SPAWNS } from "../../shared/neon";
 import { AIM, findAimTarget, inReach } from "../../shared/aim";
-import { ARROW, CLASSES, CLASS_IDS, type ClassId } from "../../shared/classes";
+import { ARROW, CLASSES, CLASS_IDS, type ClassId, STEALTH } from "../../shared/classes";
 import { arrowSegmentHit, makeArrow } from "../../shared/arrow";
 import { type BotPlan, decide, msToWaypoint, planFor } from "./bots";
 import { inputTime } from "./lag";
@@ -43,6 +43,9 @@ import {
 import {
   type Combat,
   applyDeath,
+  endStealth,
+  isBehind,
+  startStealth,
   checkAttack,
   checkReviveStart,
   completeRevive,
@@ -119,6 +122,8 @@ interface PlayerRecord {
   cls?: ClassId;
   /** 더미의 이번 단계 계획 */
   plan?: BotPlan;
+  /** 마지막으로 움직인 방향 (멈춰 있을 때 바라보는 방향, 뒤치기 판정용) */
+  faceA?: number;
 }
 
 /** storage에 저장되는 방 상태 */
@@ -441,11 +446,16 @@ export class GameRoom extends DurableObject<Env> {
         const at = inputTime(msg.at, player.body.t, now);
         if (msg.t === "move") {
           player.wantA = msg.a;
+          if (msg.a >= 0) player.faceA = msg.a;
           // 이동 불가 단계면 정지 상태 유지 (원하는 방향만 기억)
           const a = movable ? msg.a : -1;
           if (a !== player.body.a) player.body = roundBody(withAngle(player.body, a, at));
         } else if (msg.t === "crouch") {
           if (movable || !msg.on) player.body = roundBody(withCrouch(player.body, msg.on, at)); // 일어서기는 언제나
+          // 고블린: 앉으면 은신, 일어서면 은신 끝
+          const before = player.c.stealthUntil;
+          if (cls(player).sneaky) player.c = player.body.k ? startStealth(player.c, now) : endStealth(player.c, now);
+          if (player.c.stealthUntil !== before) this.broadcastRoomState(now);
         } else if (movable) {
           const jumped = withJump(player.body, at); // 공중에 있으면 null (무시)
           if (jumped) player.body = roundBody(jumped);
@@ -821,7 +831,7 @@ export class GameRoom extends DurableObject<Env> {
   /** 타격: 조준 광선(yaw/pitch)으로 맞은 상대를 찾아 체력 처리. 검증은 부르는 쪽에서 한다 */
   private performAttack(player: PlayerRecord, yaw: number, pitch: number, now: number): PlayerRecord | null {
     const st = this.state!;
-    player.c = { ...player.c, lastAttackAt: now };
+    player.c = endStealth({ ...player.c, lastAttackAt: now }, now); // 공격하면 모습이 드러난다
     const me = simulate(player.body, now);
     if (cls(player).ranged) {
       this.fireArrow(player, me, yaw, pitch, now);
@@ -831,7 +841,10 @@ export class GameRoom extends DurableObject<Env> {
       .filter((p) => p.team !== player.team && isHittable(p.c, now))
       .map((p) => ({ id: p.id, body: simulate(p.body, now), p }));
     const hit = findAimTarget(me, yaw, pitch, candidates);
-    this.landHit(player.id, hit?.p ?? null, now, cls(player).damage);
+    // 고블린 뒤치기: 대상이 바라보는 방향(움직이는 방향, 멈췄으면 마지막 방향)의 등 뒤에서 맞히면 1.5배
+    const faceA = hit ? (hit.p.body.a >= 0 ? hit.p.body.a : hit.p.faceA) : undefined;
+    const back = !!hit && !!cls(player).sneaky && faceA !== undefined && isBehind(hit.body, angleToRad(faceA), me);
+    this.landHit(player.id, hit?.p ?? null, now, Math.round(cls(player).damage * (back ? STEALTH.BACKSTAB : 1)));
     return hit?.p ?? null;
   }
 
@@ -916,7 +929,7 @@ export class GameRoom extends DurableObject<Env> {
     for (const bot of st.players) {
       if (!bot.bot || !bot.plan) continue;
       const me = seen(bot);
-      const enemies = st.players.filter((p) => p.team !== bot.team).map(seen);
+      const enemies = st.players.filter((p) => p.team !== bot.team && now >= (p.c.stealthUntil ?? 0)).map(seen); // 은신한 상대는 못 본다
       const canAttack = !checkAttack(bot.c, st.phase, this.isHolding(bot.id), now, cls(bot).cooldownMs) && now - bot.c.lastAttackAt >= BOT_ATTACK_COOLDOWN_MS;
       const d = decide(me, bot.plan, enemies, { phase: st.phase, attackingTeam: st.attackingTeam, holding: this.isHolding(bot.id), canAttack, proj: cls(bot).proj ?? null });
       if (d.attack) {
@@ -933,6 +946,7 @@ export class GameRoom extends DurableObject<Env> {
       if (!this.isHolding(bot.id)) {
         const before = bot.body.a;
         bot.wantA = d.angle;
+        if (d.angle >= 0) bot.faceA = d.angle;
         this.refreshMotion(bot, now);
         if (bot.body.a !== before) this.broadcastMove(bot);
       }
@@ -1204,6 +1218,8 @@ export class GameRoom extends DurableObject<Env> {
         deaths: p.c.deaths,
         revive: p.c.revive,
         attackReadyAt: p.c.lastAttackAt + cls(p).cooldownMs,
+        stealthUntil: p.c.stealthUntil,
+        stealthReadyAt: p.c.stealthReadyAt,
       },
       bot: !!p.bot,
       cls: p.cls ?? "KNIGHT",

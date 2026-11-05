@@ -8,6 +8,7 @@ import {
   REVIVE_INVULN_MS,
   REVIVE_TIME_MS,
 } from "./constants";
+import { STEALTH } from "../../shared/classes";
 import type { Phase, Team } from "./protocol";
 import { type WorkState, stopHold } from "./work";
 
@@ -27,6 +28,9 @@ export interface Combat {
   deaths: number;
   /** 치유 중이면 대상 id와 완료 예정 시각 */
   revive: { target: string; endsAt: number } | null;
+  /** 고블린 은신이 끝나는 시각 / 다시 쓸 수 있는 시각 (예전에 저장된 방에는 없을 수 있음) */
+  stealthUntil?: number;
+  stealthReadyAt?: number;
 }
 
 /** 경기 시작 시 상태 */
@@ -134,4 +138,24 @@ export function resolveHit(target: Combat, targetId: string, work: WorkState, no
   const c = applyHit(target, now, damage);
   const w = c.state === "DOWNED" ? stopHold(work, targetId, now) : work;
   return { c, work: w };
+}
+
+/** 은신 시작 (앉을 때): 정상 상태이고 쿨타임이 끝났을 때만. 쿨타임은 은신이 끝난 뒤부터 */
+export function startStealth(c: Combat, now: number): Combat {
+  if (c.state !== "NORMAL" || now < (c.stealthReadyAt ?? 0) || now < (c.stealthUntil ?? 0)) return c;
+  const until = now + STEALTH.DURATION_MS;
+  return { ...c, stealthUntil: until, stealthReadyAt: until + STEALTH.COOLDOWN_MS };
+}
+
+/** 은신 일찍 끝내기 (일어서거나 공격하면). 쿨타임은 지금부터 */
+export function endStealth(c: Combat, now: number): Combat {
+  if (now >= (c.stealthUntil ?? 0)) return c;
+  return { ...c, stealthUntil: now, stealthReadyAt: now + STEALTH.COOLDOWN_MS };
+}
+
+/** 뒤치기: 공격자가 대상의 등 뒤 120° 부채꼴 안에 있으면 true. face = 대상이 바라보는 방향 (라디안) */
+export function isBehind(target: { x: number; y: number }, face: number, from: { x: number; y: number }): boolean {
+  const dx = from.x - target.x, dy = from.y - target.y;
+  const d = Math.hypot(dx, dy);
+  return d > 1e-6 && (dx * Math.cos(face) + dy * Math.sin(face)) / d < -0.5;
 }

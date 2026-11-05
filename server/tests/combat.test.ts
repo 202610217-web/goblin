@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { CLASSES, isClassId } from "../../shared/classes";
+import { CLASSES, STEALTH, isClassId } from "../../shared/classes";
 import {
   ATTACK_COOLDOWN_MS, DOWN_TO_DEATH_MS, HIT_DAMAGE, MAX_HP, REVIVE_HP_RATIO, REVIVE_INVULN_MS, REVIVE_TIME_MS,
 } from "../src/constants";
 import {
   type Combat, applyDeath, applyHit, checkAttack, checkReviveStart, completeRevive, isTeamWiped, newCombat,
-  resetForRound, resolveHit, startRevive, stopRevive, wipeWinner,
+  resetForRound, resolveHit, startRevive, stopRevive, wipeWinner, startStealth, endStealth, isBehind,
 } from "../src/combat";
 import { BREAK_TIME_MS } from "../src/constants";
 import { splitDue } from "../src/deadlines";
@@ -179,5 +179,33 @@ describe("직업별 수치", () => {
   it("직업 id 검사", () => {
     expect(isClassId("ARCHER")).toBe(true);
     expect(isClassId("WIZARD")).toBe(false);
+  });
+});
+
+describe("고블린 은신 · 뒤치기", () => {
+  it("앉으면 10초 은신, 끝난 뒤 15초 쿨타임", () => {
+    const c = startStealth(newCombat(80), 1000);
+    expect(c.stealthUntil).toBe(1000 + STEALTH.DURATION_MS);
+    expect(c.stealthReadyAt).toBe(1000 + STEALTH.DURATION_MS + STEALTH.COOLDOWN_MS);
+    expect(startStealth(c, 20_000)).toBe(c); // 쿨타임 중엔 다시 안 됨
+    expect(startStealth(c, 26_000).stealthUntil).toBe(36_000);
+  });
+  it("일어서거나 공격하면 일찍 끝나고 그때부터 쿨타임", () => {
+    const c = endStealth(startStealth(newCombat(80), 1000), 4000);
+    expect(c.stealthUntil).toBe(4000);
+    expect(c.stealthReadyAt).toBe(4000 + STEALTH.COOLDOWN_MS);
+    expect(endStealth(c, 5000)).toBe(c); // 은신 아니면 그대로
+  });
+  it("기절 중엔 은신 못 함", () => {
+    const d = applyHit({ ...newCombat(80), hp: 1 }, 1000);
+    expect(startStealth(d, 2000)).toBe(d);
+  });
+  it("등 뒤 120° 안에서만 뒤치기", () => {
+    const t = { x: 0, y: 0 }; // 동쪽(+x)을 봄
+    expect(isBehind(t, 0, { x: -1, y: 0 })).toBe(true);
+    expect(isBehind(t, 0, { x: -1, y: 1.5 })).toBe(true); // 뒤쪽 56°
+    expect(isBehind(t, 0, { x: 0, y: 1 })).toBe(false); // 옆
+    expect(isBehind(t, 0, { x: 1, y: 0 })).toBe(false); // 앞
+    expect(isBehind(t, Math.PI / 2, { x: 0, y: -1 })).toBe(true); // 북쪽을 볼 때 남쪽에서
   });
 });

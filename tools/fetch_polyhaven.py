@@ -5,10 +5,10 @@ import json, os, urllib.request
 from PIL import Image
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "client", "public", "ph")
-TEXTURES = ["asphalt_02", "sparse_grass", "concrete_wall_008", "concrete_block_wall", "forest_leaves_02",
+TEXTURES = ["asphalt_02", "concrete_wall_008", "concrete_block_wall", "forest_leaves_02",
             "brown_planks_03", "rusty_metal_02", "concrete_floor_02", "red_brick_03", "clay_roof_tiles",
-            "bark_brown_02", "patterned_concrete_pavers", "metal_plate"]
-MODELS = ["wooden_crate_02", "street_lamp_01"]
+            "bark_brown_02", "patterned_concrete_pavers", "metal_plate", "leafy_grass"]
+MODELS = ["wooden_crate_02", "street_lamp_01", "rollershutter_door", "exterior_aircon_unit", "shrub_03", "rock_07", "rock_09"]
 MAPS = {"Diffuse": ("diff", 1024), "nor_gl": ("nor", 512), "Rough": ("rough", 256)}
 
 def get(url):

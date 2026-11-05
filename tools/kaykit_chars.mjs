@@ -2,17 +2,18 @@
 //   git clone --depth 1 https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0.git kaykit
 //   npm i --no-save @gltf-transform/core@4 @gltf-transform/functions@4
 //   node tools/kaykit_chars.mjs kaykit/addons/kaykit_character_pack_adventures/Characters/gltf client/public/chars
-// 게임에서 쓰는 동작 13개와 직업 장비만 남긴다 (기사 = 한손검+방패, 궁수 = 양손 석궁, 창병 = 무기 없음 → 코드가 창을 쥐어 줌)
+// 게임에서 쓰는 동작 14개와 직업 장비만 남긴다 (기사 = 한손검+방패, 궁수 = 양손 석궁, 고블린 = 단검(Rogue), 창병 = 무기 없음 → 코드가 창을 쥐어 줌)
 import { NodeIO } from "@gltf-transform/core";
 import { dedup, prune, quantize, resample, weld } from "@gltf-transform/functions";
 
 const io = new NodeIO();
 const [src, out] = process.argv.slice(2);
 const KEEP_ANIMS = ["Idle", "Walking_A", "Running_A", "Jump_Idle", "Jump_Land", "1H_Melee_Attack_Slice_Diagonal", "2H_Ranged_Shoot", "Throw",
-  "Hit_A", "Lie_Idle", "Death_A", "1H_Melee_Attack_Chop", "PickUp"];
+  "Hit_A", "Lie_Idle", "Death_A", "1H_Melee_Attack_Chop", "PickUp", "1H_Melee_Attack_Stab"];
 const DROP_NODES = {
   Knight: ["1H_Sword_Offhand", "2H_Sword", "Rectangle_Shield", "Round_Shield", "Spike_Shield"],
   Rogue_Hooded: ["Knife_Offhand", "1H_Crossbow", "Knife", "Throwable"],
+  Rogue: ["Knife_Offhand", "1H_Crossbow", "2H_Crossbow", "Throwable"],
   Barbarian: ["1H_Axe_Offhand", "Barbarian_Round_Shield", "1H_Axe", "2H_Axe", "Mug"],
 };
 const orphans = (root) => { for (const a of root.listAccessors()) if (a.listParents().every((p) => p.propertyType === "Root")) a.dispose(); };

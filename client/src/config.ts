@@ -23,6 +23,8 @@ export const CONFIG = {
   /** 조이스틱: 최대 반경(px), 데드존(0~1) */
   JOYSTICK_RADIUS: 60,
   JOYSTICK_DEADZONE: 0.25,
+  /** 캐릭터가 이동 방향으로 도는 빠르기 (클수록 빨리 돎, 1/초) */
+  TURN_SPEED: 14,
   /** 이동 메시지 최소 간격 (초당 최대 5회) */
   MOVE_SEND_INTERVAL_MS: 200,
   /** ping 간격 (20초 이하) */

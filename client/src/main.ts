@@ -228,7 +228,11 @@ $("removeBotsBtn").onclick = () => net.send({ t: "remove_bots" });
 $("practiceBtn").onclick = () => net.send({ t: "start_practice" });
 $("startBtn").onclick = () => net.send({ t: "start_game" });
 document.querySelectorAll<HTMLButtonElement>("[data-map]").forEach((b) => {
-  b.onclick = () => net.send({ t: "set_map", map: b.dataset.map });
+  b.onclick = () => {
+    // 서버 응답을 기다리지 않고 바로 눌린 것처럼 보여 준다 (응답이 오면 renderLobby가 다시 맞춘다)
+    document.querySelectorAll("[data-map]").forEach((x) => x.classList.toggle("on", x === b));
+    net.send({ t: "set_map", map: b.dataset.map });
+  };
 });
 // 직업 카드: 수치는 CLASSES 한 곳에서 (체력·사거리·속도 막대, 가장 큰 값 기준)
 // 직업 아이콘: 선 아이콘 (Figma 터치 버튼과 같은 굵기)
@@ -237,8 +241,9 @@ const CLASS_ICON: Record<string, string> = {
   KNIGHT: svgIcon('<path d="M14.5 17.5L3 6V3H6L17.5 14.5"/><path d="M13 19L19 13"/><path d="M16 16L20 20"/><path d="M19 21L21 19"/>'),
   ARCHER: svgIcon('<path d="M6 3C14 6 14 18 6 21"/><path d="M6 3V21"/><path d="M6 12H20"/><path d="M17 9L20 12L17 15"/>'),
   JAVELIN: svgIcon('<path d="M4 20L17 7"/><path d="M14 4H20V10"/><path d="M14 4L20 10"/>'),
+  GOBLIN: svgIcon('<path d="M5 19L14 10"/><path d="M14 10L19 5L18 9L14 10Z"/><path d="M7 13L11 17"/>'),
 };
-const CLASS_DESC: Record<string, string> = { KNIGHT: "검과 방패 · 근접 · 빠른 발", ARCHER: "활 · 빠른 화살", JAVELIN: "창 · 느리지만 강한 한 방" };
+const CLASS_DESC: Record<string, string> = { KNIGHT: "검과 방패 · 근접 · 빠른 발", ARCHER: "활 · 빠른 화살", JAVELIN: "창 · 느리지만 강한 한 방", GOBLIN: "단검 · 앉으면 은신 10초(쿨 15초) · 등 뒤 1.5배" };
 document.querySelectorAll<HTMLButtonElement>("[data-cls]").forEach((b) => {
   const c = CLASSES[b.dataset.cls as keyof typeof CLASSES];
   const all = Object.values(CLASSES);
@@ -248,7 +253,10 @@ document.querySelectorAll<HTMLButtonElement>("[data-cls]").forEach((b) => {
     bar("체력", c.maxHp, Math.max(...all.map((x) => x.maxHp)), "#4ade80") +
     bar("사거리", c.range, Math.max(...all.map((x) => x.range)), "#60a5fa") +
     bar("속도", c.speed, Math.max(...all.map((x) => x.speed)), "#fbbf24") + "</div>";
-  b.onclick = () => net.send({ t: "set_class", cls: b.dataset.cls });
+  b.onclick = () => {
+    document.querySelectorAll("[data-cls]").forEach((x) => x.classList.toggle("on", x === b)); // 바로 표시
+    net.send({ t: "set_class", cls: b.dataset.cls });
+  };
 });
 $("rematchBtn").onclick = () => net.send({ t: "rematch" });
 
@@ -809,6 +817,8 @@ function statusText(p: PublicPlayer, now: number): string {
     return `기절 ${Math.max(0, Math.ceil((p.combat.deathAt - now) / 1000))}초`;
   }
   if (p.combat.revive) return "치유 중";
+  if (now < (p.combat.stealthUntil ?? 0)) return `은신 ${Math.ceil((p.combat.stealthUntil! - now) / 1000)}초`;
+  if (p.id === myId && now < (p.combat.stealthReadyAt ?? 0)) return `은신 대기 ${Math.ceil((p.combat.stealthReadyAt! - now) / 1000)}초`;
   if (work?.holders.includes(p.id)) return "작업 중";
   return "";
 }
@@ -884,7 +894,7 @@ function renderButtons(now: number) {
   const readyAt = Math.max(mine.combat.attackReadyAt, localAttackAt + cooldown);
   const cd = Math.max(0, readyAt - now);
   $("attackBtn").classList.toggle("cooling", cd > 0 || !movable());
-  setText("attackLabel", cd > 0 ? (cd / 1000).toFixed(1) : mine.cls === "JAVELIN" ? "던지기" : classOf(mine).ranged ? "쏘기" : "타격");
+  setText("attackLabel", cd > 0 ? (cd / 1000).toFixed(1) : mine.cls === "JAVELIN" ? "던지기" : mine.cls === "GOBLIN" ? "찌르기" : classOf(mine).ranged ? "쏘기" : "타격");
   $("attackCd").style.height = `${(cd / cooldown) * 100}%`;
 
   // 행동: 하고 있는 것 > 할 수 있는 것 > 비활성
@@ -1049,19 +1059,26 @@ function frame() {
   for (const [id, a] of actors) {
     if (id !== myId) a.body = simulate(a.body, now);
     a.off.x *= decay; a.off.y *= decay; a.off.z *= decay;
-    if (a.body.a >= 0) a.face = angleToRad(a.body.a);
+    if (a.body.a >= 0) { // 이동 방향으로 부드럽게 돌기 (한 번에 확 꺾이지 않게, 가까운 쪽으로)
+      const d = angleToRad(a.body.a) - a.face;
+      a.face += Math.atan2(Math.sin(d), Math.cos(d)) * (1 - Math.exp(-dt * CONFIG.TURN_SPEED));
+    }
     const x = a.body.x + a.off.x, y = a.body.y + a.off.y, z = Math.max(0, a.body.z + a.off.z);
     const c = a.info.combat;
     const state = c.state === "NORMAL" ? 0 : c.state === "DOWNED" ? 1 : 2;
     a.view.activity = work?.holders.includes(id) || SITE_IDS.some((s) => room?.sites?.[s].holders.includes(id)) ? "work" : c.revive ? "revive" : null;
-    a.view.update(x, y, z, a.face, groundHeightAt(x, y, z), state, now < c.invulnUntil, a.info.conn === "RECONNECTING", t, !!a.body.k);
+    // 은신: 상대 눈에는 안 보이고, 우리 팀(나 포함)에게는 반투명
+    // shortcut: 숨기기는 화면에서만 (위치는 상대에게도 전송됨), 조작한 클라이언트를 막아야 하면 서버가 위치 전송을 거른다
+    const stealth = state === 0 && now < (c.stealthUntil ?? 0);
+    a.view.hidden = stealth && !!m && a.team !== m.team;
+    a.view.update(x, y, z, a.face, groundHeightAt(x, y, z), state, now < c.invulnUntil, a.info.conn === "RECONNECTING" || stealth, t, !!a.body.k);
     a.view.setStatus(c.hp / classOf(a.info).maxHp, inGame() ? statusText(a.info, now) : "");
     if (a === watch) {
       world.ranged = classOf(a.info).ranged;
       a.view.nearCamera = world.updateCamera(x, y, z, dt) < CONFIG.CAMERA_FADE_RATIO;
     }
     else a.view.nearCamera = false;
-    if (m && a.team !== m.team && c.state === "NORMAL" && now >= c.invulnUntil) enemyBuf.push(a);
+    if (m && a.team !== m.team && c.state === "NORMAL" && now >= c.invulnUntil && !stealth) enemyBuf.push(a);
   }
   if (!watch) world.updateCamera(24, 14 - 8, 0); // 입장 전: 맵 가운데를 비춤
   world.updateArrows(now);
