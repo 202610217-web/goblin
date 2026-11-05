@@ -24,7 +24,7 @@ import { MAPS, PHYS } from "../../shared/world";
 import { NEON_SPAWNS } from "../../shared/neon";
 import { findAimTarget } from "../../shared/aim";
 import { ARROW, CLASSES, CLASS_IDS, type ClassId, SKILLS, STEALTH, ULTS, ULT_PER_DAMAGE, attackCooldownMs } from "../../shared/classes";
-import { arrowSegmentHit, makeArrow } from "../../shared/arrow";
+import { arrowSegmentHit, firstSolid, makeArrow } from "../../shared/arrow";
 import { type BotPlan, decide, msToWaypoint, planFor } from "./bots";
 import { inputTime } from "./lag";
 import { type Score, addKill, killWinner, timeUpWinner } from "./score";
@@ -64,6 +64,7 @@ import {
   type Team,
   type UsageStats,
   parseClientMessage,
+  type Smoke,
 } from "./protocol";
 
 /** 서버만 아는 플레이어 정보 (token은 절대 다른 사람에게 보내지 않는다) */
@@ -104,6 +105,8 @@ interface RoomState extends PhaseState {
   practice: boolean;
   players: PlayerRecord[];
   deadlines: Deadline[];
+  /** 고블린 연막 (예전에 저장된 방에는 없을 수 있음) */
+  smokes?: Smoke[];
 }
 
 /** 소켓마다 붙여두는 정보 (Hibernation 후에도 유지됨) */
@@ -135,7 +138,7 @@ const maxHp = (p: { cls?: ClassId }) => cls(p).maxHp;
 function speedOf(p: { cls?: ClassId; c: Combat }, now: number): number {
   const sk = SKILLS[p.cls ?? "KNIGHT"];
   const boost = sk?.speedMul && now < (p.c.skillUntil ?? 0) ? sk.speedMul : 1;
-  const slow = now < (p.c.slowUntil ?? 0) ? SKILLS.JAVELIN!.slowMul! : 1;
+  const slow = now < (p.c.slowUntil ?? 0) ? p.c.slowMul ?? 0.5 : 1;
   return cls(p).speed * boost * slow;
 }
 /** 지금 공격 쿨다운 (궁수 스킬 중이면 짧음) */
@@ -432,14 +435,27 @@ export class GameRoom extends DurableObject<Env> {
         if (!ult || !isCombatPhase(st.phase) || player.c.state !== "NORMAL") return this.sendError(ws, "cannot_ult", "지금은 궁극기를 쓸 수 없어요");
         if ((player.c.ult ?? 0) < 100) return this.sendError(ws, "cannot_ult", "궁극기 게이지가 아직 다 안 찼어요");
         const me = simulate(player.body, now);
-        const candidates = st.players
-          .filter((p) => p.team !== player.team && isHittable(p.c, now))
-          .map((p) => ({ id: p.id, body: simulate(p.body, now), p }));
-        const hit = findAimTarget(me, msg.yaw, 0, candidates, ult.range);
-        if (!hit) return this.sendError(ws, "cannot_ult", `앞쪽 ${ult.range}m 안에 적이 없어요`); // 게이지는 그대로
-        player.c = endStealth({ ...player.c, ult: 0 }, now);
-        this.broadcast({ t: "ult", by: player.id, target: hit.id, x: hit.body.x, y: hit.body.y, z: hit.body.z, serverTime: now });
-        this.landHit(player.id, hit.p, now, ult.damage, false);
+        if (ult.kind === "sword") {
+          const candidates = st.players
+            .filter((p) => p.team !== player.team && isHittable(p.c, now))
+            .map((p) => ({ id: p.id, body: simulate(p.body, now), p }));
+          const hit = findAimTarget(me, msg.yaw, 0, candidates, ult.range);
+          if (!hit) return this.sendError(ws, "cannot_ult", `앞쪽 ${ult.range}m 안에 적이 없어요`); // 게이지는 그대로
+          player.c = endStealth({ ...player.c, ult: 0 }, now);
+          this.broadcast({ t: "ult", kind: "sword", by: player.id, target: hit.id, x: hit.body.x, y: hit.body.y, z: hit.body.z, serverTime: now });
+          this.landHit(player.id, hit.p, now, ult.damage, false);
+        } else if (ult.kind === "rain") {
+          player.c = endStealth({ ...player.c, ult: 0, lastAttackAt: now }, now);
+          this.arrowRain(player, me, msg.yaw, msg.pitch, now, ult);
+        } else if (ult.kind === "spear") {
+          player.c = endStealth({ ...player.c, ult: 0, lastAttackAt: now }, now);
+          this.fireArrow(player, me, msg.yaw, msg.pitch, now, ult);
+        } else {
+          player.c = { ...player.c, ult: 0 };
+          const smoke: Smoke = { team: player.team, x: me.x, y: me.y, z: me.z, radius: ult.radius!, until: now + ult.durationMs! };
+          st.smokes = [...(st.smokes ?? []).filter((s) => s.until > now), smoke];
+          this.broadcast({ t: "ult", kind: "smoke", by: player.id, x: me.x, y: me.y, z: me.z, radius: smoke.radius, serverTime: now });
+        }
         await this.commit();
         this.broadcastRoomState(now);
         return;
@@ -671,7 +687,8 @@ export class GameRoom extends DurableObject<Env> {
   /** 타격: 조준 광선(yaw/pitch)으로 맞은 상대를 찾아 체력 처리. 검증은 부르는 쪽에서 한다 */
   private performAttack(player: PlayerRecord, yaw: number, pitch: number, now: number): PlayerRecord | null {
     const st = this.state!;
-    player.c = endStealth({ ...player.c, lastAttackAt: now }, now); // 공격하면 모습이 드러난다
+    // 공격하면 모습이 드러난다 (자기 팀 연막 안이면 유지)
+    player.c = this.inOwnSmoke(player, now) ? { ...player.c, lastAttackAt: now } : endStealth({ ...player.c, lastAttackAt: now }, now);
     const me = simulate(player.body, now);
     if (cls(player).ranged) {
       this.fireArrow(player, me, yaw, pitch, now);
@@ -723,12 +740,45 @@ export class GameRoom extends DurableObject<Env> {
     this.broadcastMove(p);
   }
 
-  private fireArrow(shooter: PlayerRecord, me: Body, yaw: number, pitch: number, now: number) {
-    const arrow = makeArrow(me, yaw, pitch, now, cls(shooter).proj);
+  /** 궁수 화살비: 조준점(벽·땅에 닿는 곳, 최대 range m) 바닥에 delayMs 뒤 떨어져 반경 안 적 모두에게 데미지 */
+  private arrowRain(shooter: PlayerRecord, me: Body, yaw: number, pitch: number, now: number, ult: NonNullable<(typeof ULTS)["ARCHER"]>) {
+    const aim = makeArrow(me, yaw, pitch, now, { speed: 1, range: ult.range });
+    const d = Math.min(ult.range + 2, firstSolid(aim.origin, aim.dir, 0));
+    const x = aim.origin.x + aim.dir.x * d, y = aim.origin.y + aim.dir.y * d;
+    const z = groundHeightAt(x, y, aim.origin.z + aim.dir.z * d + 0.1);
+    const at = now + ult.delayMs!;
+    this.broadcast({ t: "ult", kind: "rain", by: shooter.id, x, y, z, radius: ult.radius, serverTime: at });
+    // shortcut: 화살과 같은 메모리 타이머라 방이 잠들거나 재시작되면 사라짐, 오래 걸리는 효과가 생기면 마감 목록으로
+    setTimeout(async () => {
+      const st = this.state;
+      if (!st || !isCombatPhase(st.phase)) return;
+      const t = Math.max(at, Date.now());
+      for (const p of st.players) {
+        if (p.team === shooter.team || !isHittable(p.c, t)) continue;
+        const b = simulate(p.body, t);
+        if (Math.hypot(b.x - x, b.y - y) <= ult.radius! && Math.abs(b.z - z) <= 2.5) this.landHit(shooter.id, p, t, ult.damage, false);
+      }
+      await this.commit();
+      this.broadcastRoomState(t);
+    }, ult.delayMs);
+  }
+
+  /** 지금 자기 팀 연막 안에 있는지 (연막 안에서는 공격해도 은신 유지) */
+  private inOwnSmoke(p: PlayerRecord, now: number): boolean {
+    const b = simulate(p.body, now);
+    return (this.state!.smokes ?? []).some((s) => s.team === p.team && s.until > now && Math.hypot(b.x - s.x, b.y - s.y) <= s.radius);
+  }
+
+  /** 화살/창. ult = 거대 창 (궁극기: 더 멀리·세게, 게이지 안 채움) */
+  private fireArrow(shooter: PlayerRecord, me: Body, yaw: number, pitch: number, now: number, ult?: (typeof ULTS)["JAVELIN"]) {
+    const arrow = makeArrow(me, yaw, pitch, now, ult ? { speed: ult.speed!, range: ult.range } : cls(shooter).proj);
     // 창던지기병 발 묶기: 켜 둔 동안 던진 다음 창 한 발에만 붙고, 던지면 스킬이 끝난다
-    const slow = SKILLS[shooter.cls ?? "KNIGHT"]?.slowMs !== undefined && now < (shooter.c.skillUntil ?? 0);
-    if (slow) shooter.c = { ...shooter.c, skillUntil: now };
-    this.broadcast({ t: "shot", by: shooter.id, ...arrow });
+    const sk = SKILLS[shooter.cls ?? "KNIGHT"];
+    const skillSlow = !ult && sk?.slowMs !== undefined && now < (shooter.c.skillUntil ?? 0);
+    if (skillSlow) shooter.c = { ...shooter.c, skillUntil: now };
+    const slowing = ult ? { ms: ult.slowMs!, mul: ult.slowMul! } : skillSlow ? { ms: sk!.slowMs!, mul: sk!.slowMul! } : null;
+    const damage = ult?.damage ?? cls(shooter).damage;
+    this.broadcast({ t: "shot", by: shooter.id, ...arrow, ...(ult ? { big: true } : {}) });
     let from = now;
     const step = async () => {
       const st = this.state;
@@ -736,9 +786,9 @@ export class GameRoom extends DurableObject<Env> {
       const to = Math.max(from, Date.now());
       const r = arrowSegmentHit(arrow, from, to, st.players.filter((p) => p.team !== shooter.team && isHittable(p.c, to)));
       if (r.hit) {
-        this.landHit(shooter.id, r.hit, to, cls(shooter).damage);
-        if (slow && r.hit.c.state === "NORMAL") {
-          r.hit.c = { ...r.hit.c, slowUntil: to + SKILLS.JAVELIN!.slowMs! };
+        this.landHit(shooter.id, r.hit, to, damage, !ult);
+        if (slowing && r.hit.c.state === "NORMAL") {
+          r.hit.c = { ...r.hit.c, slowUntil: to + slowing.ms, slowMul: slowing.mul };
           this.applySpeed(r.hit, to);
           st.deadlines = upsertDeadline(st.deadlines, { kind: "skill", key: "slow:" + r.hit.id, at: r.hit.c.slowUntil! });
         }
@@ -1012,6 +1062,7 @@ export class GameRoom extends DurableObject<Env> {
       matchWinner: st.matchWinner,
       matchEndReason: st.matchEndReason,
       practice: st.practice,
+      smokes: (st.smokes ?? []).filter((s) => s.until > now),
       players: this.publicPlayers(),
       serverTime: now,
     });

@@ -232,6 +232,8 @@ button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64
 
 /* ---------- 맞은 방향 (화면 가장자리 붉은 호) ---------- */
 #dmgLayer { position: fixed; inset: 0; pointer-events: none; z-index: 7; overflow: hidden; }
+/* 적 연막 안: 가운데만 조금 보이고 나머지는 회색 연기 */
+#smokeFog { position: fixed; inset: 0; pointer-events: none; z-index: 6; background: radial-gradient(circle at 50% 55%, rgba(120, 124, 132, 0.55) 0, rgba(120, 124, 132, 0.92) 22%, rgba(110, 114, 122, 0.97) 60%); }
 .dmgDir { position: absolute; left: 50%; top: 50%; width: 70vmin; height: 70vmin; margin: -35vmin 0 0 -35vmin; border-radius: 50%;
   background: radial-gradient(ellipse at 50% 0%, rgba(255, 30, 30, 0.75), rgba(255, 30, 30, 0) 45%); animation: fadeOut 0.9s ease-out forwards; }
 @keyframes fadeOut { to { opacity: 0; } }

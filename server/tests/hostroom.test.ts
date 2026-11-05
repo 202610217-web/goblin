@@ -185,6 +185,56 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     host.stop();
   });
 
+  it("궁극기 3종: 궁수 화살비(1초 뒤 반경 3m 모두 30), 창병 거대 창(70 + 1초 20% 속도), 고블린 연막(안에서 공격해도 은신 유지)", async () => {
+    const host = new HostRoom("ULT3", { DEBUG_COMMANDS: "true" });
+    const a = fakePeer(), b = fakePeer();
+    host.addPeer(a, "HOST"); host.addPeer(b, "P2P");
+    await tick();
+    a.push({ t: "join", nickname: "쏘는쪽" }); b.push({ t: "join", nickname: "맞는쪽" });
+    await tick(5);
+    a.push({ t: "start_practice" }); await tick(5);
+    a.push({ t: "set_class", cls: "ARCHER" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "COUNTDOWN" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "PLAY" }); await tick(5);
+    const aId = last(a, "welcome").playerId, bId = last(b, "welcome").playerId;
+    const me = (id: string) => last(a, "room_state").players.find((p: any) => p.id === id);
+    const rec = (id: string) => (host as any).room.state.players.find((p: any) => p.id === id);
+    const full = () => { rec(aId).c.ult = 100; };
+    // 화살비: 내려다본 땅(조준점)에 떨어짐. 떨어질 자리를 받아 적을 그 옆 2m에 세운다
+    a.push({ t: "debug_teleport", x: 10, y: 2 }); await tick(5);
+    full();
+    a.push({ t: "ult", yaw: 0, pitch: 0.6 }); await tick(5);
+    const rain = last(b, "ult");
+    expect(rain).toMatchObject({ kind: "rain", by: aId, radius: 3 });
+    b.push({ t: "debug_teleport", x: rain.x + 2, y: rain.y }); await tick(5);
+    let hp0 = me(bId).combat.hp;
+    await tick(1_100);
+    expect(me(bId).combat.hp).toBe(hp0 - 30);
+    expect(me(aId).combat.ult).toBe(0);
+    // 거대 창 (창병으로 바꿔서)
+    rec(aId).cls = "JAVELIN";
+    const spear = makeArrow(makeBody(10, 2, 0), 0, 0.1, 0, { speed: 26, range: 25 });
+    b.push({ t: "debug_teleport", x: 10 + spear.dir.x * 6, y: 2 + spear.dir.y * 6 }); await tick(5);
+    rec(bId).c.invulnUntil = 0;
+    hp0 = me(bId).combat.hp;
+    full();
+    a.push({ t: "ult", yaw: 0, pitch: 0.1 }); await tick(5);
+    expect(last(b, "shot")).toMatchObject({ by: aId, big: true, range: 25 });
+    await tick(400);
+    expect(me(bId).combat.hp).toBe(hp0 - 70);
+    expect(me(bId).body.v).toBeCloseTo(CLASSES.KNIGHT.speed * 0.2, 2);
+    // 연막: 내 자리에 생기고, 안에서 공격해도 은신이 안 풀림
+    rec(aId).cls = "GOBLIN";
+    rec(aId).c.stealthReadyAt = 0; rec(aId).c.stealthUntil = 0; rec(aId).c.lastAttackAt = 0;
+    full();
+    a.push({ t: "ult", yaw: 0, pitch: 0 }); await tick(5);
+    expect(last(a, "room_state").smokes).toMatchObject([{ team: me(aId).team, radius: 4 }]);
+    a.push({ t: "skill" }); await tick(5);
+    a.push({ t: "attack", yaw: 0, pitch: 0.3 }); await tick(5);
+    expect(me(aId).combat.stealthUntil).toBeGreaterThan(Date.now());
+    host.stop();
+  });
+
   it("고블린이 등 뒤에서 찌르면 1.5배 (swing에 실제 데미지), 앞에서는 기본 데미지", async () => {
     const host = new HostRoom("BACK", { DEBUG_COMMANDS: "true" });
     const a = fakePeer(), b = fakePeer();

@@ -514,9 +514,14 @@ export class World3D {
   private static arrowMat = new THREE.MeshBasicMaterial({ color: 0xfff1b8 });
   private props: { arrow: THREE.Object3D; spear: THREE.Object3D } | null = null;
 
-  addArrow(by: string, origin: Vec3, dir: Vec3, at: number, speed: number, range: number, spear: boolean) {
+  addArrow(by: string, origin: Vec3, dir: Vec3, at: number, speed: number, range: number, spear: boolean, big = false) {
     const model = this.props?.[spear ? "spear" : "arrow"];
     const mesh = model ? model.clone() : new THREE.Mesh(World3D.arrowGeo, World3D.arrowMat);
+    if (big) { // 궁극기 거대 창: 2.5배 + 금빛 빛무리
+      mesh.scale.multiplyScalar(2.5);
+      const halo = new THREE.Mesh(new THREE.SphereGeometry(0.25, 10, 6).scale(1, 6, 1), new THREE.MeshBasicMaterial({ color: 0xffc94a, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }));
+      mesh.add(halo);
+    }
     World3D.toThree(dir.x, dir.y, dir.z, tmp);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tmp.normalize());
     this.scene.add(mesh);
@@ -560,7 +565,79 @@ export class World3D {
     this.ults.push({ g: root, mats: [...mats, ring.material as THREE.MeshBasicMaterial, glow.material as THREE.MeshBasicMaterial], ring, glow, at });
   }
 
+  // ---------- 궁수 화살비: 떨어질 자리에 붉은 원이 깜빡이다가, 시간이 되면 화살이 한꺼번에 쏟아진다 ----------
+  private rains: { g: THREE.Group; ring: THREE.Mesh; arrows: THREE.Mesh[]; mats: THREE.MeshBasicMaterial[]; at: number }[] = [];
+  addRain(x: number, y: number, z: number, radius: number, at: number) {
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xff5a3c, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(radius * 0.92, radius, 48).rotateX(-Math.PI / 2), ringMat);
+    const fill = new THREE.Mesh(new THREE.CircleGeometry(radius, 48).rotateX(-Math.PI / 2), ringMat);
+    fill.scale.setScalar(1); fill.position.y = 0.03; ring.position.y = 0.04;
+    const arrowMat = new THREE.MeshBasicMaterial({ color: 0xfff1b8, transparent: true, opacity: 1 });
+    const arrows: THREE.Mesh[] = [];
+    const g = new THREE.Group();
+    World3D.toThree(x, y, z, g.position);
+    for (let i = 0; i < 26; i++) {
+      const r = radius * Math.sqrt(Math.random()), a = Math.random() * Math.PI * 2;
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 4), arrowMat);
+      m.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+      m.userData.delay = Math.random() * 180; // 조금씩 다른 때 떨어짐
+      m.visible = false;
+      arrows.push(m);
+      g.add(m);
+    }
+    g.add(fill, ring);
+    this.scene.add(g);
+    this.rains.push({ g, ring: fill, arrows, mats: [ringMat, arrowMat], at });
+  }
+
+  // ---------- 고블린 연막: 회색 연기 덩어리 (room_state의 목록대로 만들고 지운다) ----------
+  private smokes = new Map<string, { g: THREE.Group; mat: THREE.MeshLambertMaterial; until: number }>();
+  setSmokes(list: { x: number; y: number; z: number; radius: number; until: number }[], serverNow: number) {
+    const keep = new Set<string>();
+    for (const s of list) {
+      const key = `${s.x},${s.y},${s.until}`;
+      keep.add(key);
+      let e = this.smokes.get(key);
+      if (!e) {
+        const mat = new THREE.MeshLambertMaterial({ color: 0x80858c, flatShading: true, transparent: true, opacity: 0, depthWrite: false }); // 빛을 받아 덩어리감
+        const g = new THREE.Group();
+        World3D.toThree(s.x, s.y, s.z, g.position);
+        for (let i = 0; i < 14; i++) { // 반구 모양으로 겹친 연기 덩어리
+          const r = s.radius * Math.sqrt(Math.random()) * 0.85, a = Math.random() * Math.PI * 2;
+          const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(1.1 + Math.random() * 0.9, 1), mat);
+          puff.position.set(Math.cos(a) * r, 0.6 + Math.random() * 1.6, Math.sin(a) * r);
+          g.add(puff);
+        }
+        this.scene.add(g);
+        e = { g, mat, until: s.until };
+        this.smokes.set(key, e);
+      }
+      const left = s.until - serverNow;
+      e.mat.opacity = 0.8 * Math.min(1, left / 800);
+      e.g.rotation.y += 0.002;
+    }
+    for (const [key, e] of this.smokes) {
+      if (keep.has(key) && e.until > serverNow) continue;
+      this.scene.remove(e.g);
+      e.mat.dispose();
+      e.g.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose(); });
+      this.smokes.delete(key);
+    }
+  }
+
   updateUlts(serverNow: number) {
+    this.rains = this.rains.filter((r) => {
+      const t = serverNow - r.at; // 0 = 화살이 땅에 닿는 시각
+      if (t > 900) { this.scene.remove(r.g); r.mats.forEach((m) => m.dispose()); r.g.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose(); }); return false; }
+      r.mats[0]!.opacity = t < 0 ? 0.25 + 0.25 * Math.abs(Math.sin(serverNow / 120)) : 0.5 * (1 - t / 900);
+      for (const a of r.arrows) {
+        const tt = t + 250 - (a.userData.delay as number); // 땅에 닿기 250ms 전부터 떨어짐
+        a.visible = tt > 0;
+        a.position.y = Math.max(0.35, 7 * (1 - Math.min(1, tt / 250)));
+      }
+      r.mats[1]!.opacity = t < 400 ? 1 : 1 - (t - 400) / 500;
+      return true;
+    });
     const FALL = 220, END = 1100;
     this.ults = this.ults.filter((u) => {
       const t = serverNow - u.at;

@@ -310,7 +310,8 @@ net.onMessage = (m) => {
       onSwing(m.by, m.target, m.damage);
       break;
     case "ult":
-      world.addUlt(m.x, m.y, m.z, m.serverTime);
+      if (m.kind === "sword") world.addUlt(m.x, m.y, m.z, m.serverTime);
+      else if (m.kind === "rain") world.addRain(m.x, m.y, m.z, m.radius ?? 3, m.serverTime);
       break;
     case "shot":
       onShot(m as Extract<ServerMessage, { t: "shot" }>);
@@ -439,7 +440,7 @@ function onShot(m: Extract<ServerMessage, { t: "shot" }>) {
   const t = performance.now();
   if (m.by !== myId) actors.get(m.by)?.view.swing(t);
   else if (attackSentAt) { net.addRttSample(t - attackSentAt); attackSentAt = 0; }
-  world.addArrow(m.by, m.origin, m.dir, m.at, m.speed, m.range, actors.get(m.by)?.info.cls === "JAVELIN");
+  world.addArrow(m.by, m.origin, m.dir, m.at, m.speed, m.range, actors.get(m.by)?.info.cls === "JAVELIN", !!m.big);
 }
 
 /** 마지막으로 그 사람을 때린 사람 (처치 알림용) */
@@ -810,7 +811,10 @@ function frame() {
     // 4-2) 스킬 (쿨타임·적용은 서버가 판단, 결과는 room_state/move로 온다)
     if (input.consumeSkill() && movable() && myNormal() && SKILLS[m.info.cls]) net.send({ t: "skill" }); // 쿨타임은 서버가 막는다
     // 4-3) 궁극기 (게이지 100%, 앞쪽 범위 안 적 확인은 서버가 한다)
-    if (input.consumeUlt() && movable() && myNormal() && ULTS[m.info.cls] && (m.info.combat.ult ?? 0) >= 100) net.send({ t: "ult", yaw: m.face });
+    if (input.consumeUlt() && movable() && myNormal() && ULTS[m.info.cls] && (m.info.combat.ult ?? 0) >= 100) {
+      // 근접(기사)은 캐릭터가 바라보는 쪽, 원거리는 조준점 방향
+      net.send({ t: "ult", yaw: classOf(m.info).ranged ? world.yaw : m.face, pitch: world.pitch });
+    }
     // 5) 타격 (1회 = 메시지 1개). 원거리는 조준점(카메라) 방향, 근접은 캐릭터가 바라보는 방향으로. 판정은 서버가 같은 방향으로 한다
     if (input.consumeAttack()) attackBufferedUntil = now + CONFIG.ATTACK_BUFFER_MS;
     if (now <= attackBufferedUntil) {
@@ -868,6 +872,11 @@ function frame() {
   if (!watch) world.updateCamera(24, 14 - 8, 0); // 입장 전: 맵 가운데를 비춤
   world.updateArrows(now);
   world.updateUlts(now);
+  // 고블린 연막: 연기 그리기 + 적 연막 안에 들어가면 화면이 뿌옇게
+  const smokes = (inGame() && room?.smokes) || [];
+  world.setSmokes(smokes, now);
+  const mb = me()?.body, myTeam = me()?.team;
+  $("smokeFog").classList.toggle("hidden", !mb || !smokes.some((s) => s.team !== myTeam && s.until > now && Math.hypot(mb.x - s.x, mb.y - s.y) <= s.radius));
   world.render();
   for (const a of actors.values()) a.view.placeLabel(world.camera, w, h);
 
@@ -900,7 +909,7 @@ if (OFFLINE) {
   const t0 = net.serverNow();
   applyRoomState({
     t: "room_state", room: "연습", phase: "PLAY", phaseEndsAt: null,
-    map: "CLASSIC", score: { A: 0, B: 0 }, matchWinner: null, matchEndReason: null, practice: true,
+    map: "CLASSIC", score: { A: 0, B: 0 }, matchWinner: null, matchEndReason: null, practice: true, smokes: [],
     serverTime: t0,
     players: [{
       id: "me", nickname: "연습", team: "A", conn: "CONNECTED", reconnectDeadline: null, ready: true,

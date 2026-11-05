@@ -33,8 +33,8 @@ export type ClientMessage =
   | { t: "attack"; yaw: number; pitch: number }
   /** 직업 스킬 (기사 이속 증가, 궁수 공속 증가) */
   | { t: "skill" }
-  /** 궁극기 (게이지 100%일 때). yaw = 캐릭터가 바라보는 방향 */
-  | { t: "ult"; yaw: number }
+  /** 궁극기 (게이지 100%일 때). 근접 = 캐릭터가 바라보는 방향, 원거리 = 카메라(조준점) 방향 */
+  | { t: "ult"; yaw: number; pitch: number }
   /** 경기 종료 화면에서 "다시 하기" → 로비로 돌아가 다시 준비 */
   | { t: "rematch" }
   /** 로비: 빈자리를 연습용 더미로 채우기 / 더미 모두 빼기 */
@@ -82,6 +82,9 @@ export type PublicCombat = Omit<Combat, "lastAttackAt"> & {
   attackReadyAt: number;
 };
 
+/** 고블린 연막탄: team = 던진 팀 */
+export interface Smoke { team: Team; x: number; y: number; z: number; radius: number; until: number }
+
 export interface RoomStateMessage {
   t: "room_state";
   room: string;
@@ -99,6 +102,8 @@ export interface RoomStateMessage {
   practice: boolean;
   players: PublicPlayer[];
   serverTime: number;
+  /** 고블린 연막 (끝나지 않은 것만) */
+  smokes: Smoke[];
 }
 
 /** 무료 한도 점검용 카운터 */
@@ -143,10 +148,10 @@ export type ServerMessage =
   | { t: "debug_stats"; stats: UsageStats }
   /** 누군가 타격했을 때 (target = 맞은 사람, 빗나가면 null). 체력 변화·킬은 함께 오는 room_state로 반영 */
   /** 궁극기가 떨어짐 (화면 효과용). 데미지는 swing으로 따로 온다 */
-  | { t: "ult"; by: string; target: string; x: number; y: number; z: number; serverTime: number }
+  | { t: "ult"; kind: "sword" | "rain" | "smoke"; by: string; target?: string; x: number; y: number; z: number; serverTime: number; radius?: number }
   | { t: "swing"; by: string; target: string | null; serverTime: number; /** 실제로 들어간 데미지 (뒤치기 1.5배 포함) */ damage: number }
   /** 궁수가 쐈을 때 (화면이 같은 화살을 그림). at = 쏜 서버 시각. 맞으면 swing(target)이 따로 온다 */
-  | { t: "shot"; by: string; origin: Vec3; dir: Vec3; at: number; speed: number; range: number }
+  | { t: "shot"; by: string; origin: Vec3; dir: Vec3; at: number; speed: number; range: number; /** 궁극기 거대 창 */ big?: boolean }
   | { t: "error"; code: ErrorCode; message: string };
 
 const isTime = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
@@ -191,7 +196,7 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case "skill":
       return { t: "skill" };
     case "ult":
-      return typeof m.yaw === "number" && Number.isFinite(m.yaw) ? { t: "ult", yaw: m.yaw } : null;
+      return typeof m.yaw === "number" && Number.isFinite(m.yaw) ? { t: "ult", yaw: m.yaw, pitch: typeof m.pitch === "number" && Number.isFinite(m.pitch) ? m.pitch : 0 } : null;
     case "rematch":
       return { t: "rematch" };
     case "add_bots":

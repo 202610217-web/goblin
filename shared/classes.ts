@@ -51,9 +51,22 @@ export const SKILLS: Partial<Record<ClassId, {
 
 /** 궁극기 게이지: 내가 준 피해 1당 0.5% (피해 200이면 100%). 100%가 되면 쓸 수 있고, 쓰면 0% */
 export const ULT_PER_DAMAGE = 0.5;
-/** 궁극기 (없는 직업은 버튼이 숨는다). 기사: 앞쪽(양옆 30°) range m 안의 적 한 명에게 하늘에서 큰 칼을 내리꽂는다 */
-export const ULTS: Partial<Record<ClassId, { name: string; damage: number; range: number }>> = {
-  KNIGHT: { name: "하늘 검", damage: 50, range: 4 },
+/**
+ * 궁극기.
+ * - 기사 하늘 검(sword): 앞쪽(양옆 30°) range m 안의 적 한 명에게 하늘에서 큰 칼을 내리꽂는다
+ * - 궁수 화살비(rain): 조준점(최대 range m) 반경 radius m에 delayMs 뒤 화살이 쏟아져 안의 적 모두에게 데미지
+ * - 창던지기병 거대 창(spear): 크고 빠른 창 한 발 (range m), 맞은 적은 slowMs 동안 slowMul 속도
+ * - 고블린 연막탄(smoke): 내 자리에 반경 radius m 연기 durationMs 동안. 연기 안의 적은 앞이 잘 안 보이고,
+ *   연기 안에서 우리 팀이 공격해도 은신이 안 풀린다
+ */
+export const ULTS: Partial<Record<ClassId, {
+  name: string; kind: "sword" | "rain" | "spear" | "smoke"; damage: number; range: number;
+  radius?: number; delayMs?: number; speed?: number; slowMs?: number; slowMul?: number; durationMs?: number;
+}>> = {
+  KNIGHT: { name: "하늘 검", kind: "sword", damage: 50, range: 4 },
+  ARCHER: { name: "화살비", kind: "rain", damage: 30, range: 20, radius: 3, delayMs: 1_000 },
+  JAVELIN: { name: "거대 창", kind: "spear", damage: 70, range: 25, speed: 26, slowMs: 1_000, slowMul: 0.2 },
+  GOBLIN: { name: "연막탄", kind: "smoke", damage: 0, range: 0, radius: 4, durationMs: 6_000 },
 };
 
 /** 지금 공격 쿨다운 (궁수 스킬 중이면 짧아짐). 서버 판정과 화면이 같은 값을 쓴다 */

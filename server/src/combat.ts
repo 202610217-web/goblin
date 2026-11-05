@@ -25,6 +25,8 @@ export interface Combat {
   skillReadyAt?: number;
   /** 창던지기병 발 묶는 창에 맞아 느려진 상태가 끝나는 시각 */
   slowUntil?: number;
+  /** 느려진 동안 속도 배수 (없으면 0.5) */
+  slowMul?: number;
   /** 궁극기 게이지 0~100 (%) */
   ult?: number;
 }
