@@ -109,22 +109,22 @@ describe("NEON DISTRICT 방 흐름", () => {
     b.push({ t: "debug_teleport", ...frontOf("A", 1.5) }); await run(1);
     b.push({ t: "hold_start" }); await run(1);
     expect(last(b, "error").code).toBe("cannot_work"); // 수비팀은 부술 수 없음
-    a.push({ t: "hold_start" }); await run(10_000);
+    a.push({ t: "hold_start" }); await run(BREAK_TIME_MS / 4);
     let sites = last(a, "work").sites;
     expect(sites.A.holders).toEqual([id(a)]);
     expect(sites.B.holders).toEqual([]);
     expect(sites.B.progress).toBe(0);
     c.push({ t: "hold_start" }); await run(1);
     expect(last(a, "work").sites.B.holders).toEqual([id(c)]);
-    await run(BREAK_TIME_MS - 10_000); // A 완료 (B는 아직 2/3)
+    await run((BREAK_TIME_MS * 3) / 4); // A 완료 (B는 약 3/4)
     const st = last(a, "room_state");
     expect(st.phase).toBe("ROUND_END");
     expect(st.roundEnd).toEqual({ winner: "A", reason: "site_destroyed", site: "A" });
     expect(st.score).toEqual({ A: 1, B: 0 });
     expect(st.sites.A.progress).toBe(1);
     const bLeft = st.sites.B.progress;
-    expect(bLeft).toBeGreaterThan(0.6);
-    expect(bLeft).toBeLessThan(0.7);
+    expect(bLeft).toBeGreaterThan(0.7);
+    expect(bLeft).toBeLessThan(0.8);
     c.push({ t: "hold_start" }); await run(2_000);
     expect(last(c, "error").code).toBe("cannot_work");
     expect(last(a, "room_state").sites.B.progress).toBe(bLeft);

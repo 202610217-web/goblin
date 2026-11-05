@@ -7,6 +7,7 @@ import {
   type Combat, applyDeath, applyHit, checkAttack, checkReviveStart, completeRevive, isTeamWiped, newCombat,
   resetForRound, resolveHit, startRevive, stopRevive, wipeWinner,
 } from "../src/combat";
+import { BREAK_TIME_MS } from "../src/constants";
 import { splitDue } from "../src/deadlines";
 import { startHold, workForPhase, progressAt, completionAt } from "../src/work";
 
@@ -124,10 +125,10 @@ describe("집 작업과 전투", () => {
     expect(completionAt(r.work)).toBe(completionAt(w));
   });
   it("작업 중 기절하면 작업 중단 (체크포인트 규칙 적용)", () => {
-    const r = resolveHit({ ...newCombat(), hp: HIT_DAMAGE }, "p", working(), 5000);
+    const r = resolveHit({ ...newCombat(), hp: HIT_DAMAGE }, "p", working(), BREAK_TIME_MS / 4);
     expect(r.c.state).toBe("DOWNED");
     expect(r.work.holders).toEqual([]);
-    expect(progressAt(r.work, 99_999)).toBe(0); // 5초(16%)에서 중단 → 0%
+    expect(progressAt(r.work, 99_999)).toBe(0); // 25%에서 중단 → 0%
   });
 });
 

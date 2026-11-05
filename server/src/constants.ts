@@ -64,9 +64,9 @@ export const STATE_FLUSH_MS = 5_000;
 
 // ---------- 3단계: 집 작업 (꾹 누르기) ----------
 /** 부수기 작업 시간 (혼자 0% → 100%) */
-export const BREAK_TIME_MS = 30_000;
+export const BREAK_TIME_MS = 4_000;
 /** 수리 작업 시간 */
-export const REPAIR_TIME_MS = 20_000;
+export const REPAIR_TIME_MS = 4_000;
 /** 체크포인트 비율: 버튼을 떼면 이보다 낮으면 0, 이상이면 이 값으로 되돌아감 */
 export const WORK_CHECKPOINT = 0.5;
 /** 같은 팀 2명 이상이 동시에 누를 때 속도 배수 (1.0 = 1명과 같음) */

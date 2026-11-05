@@ -58,9 +58,9 @@ describe("체크포인트 (버튼 뗌)", () => {
   });
   it("다시 누르면 체크포인트부터 이어서 진행", () => {
     let w = startHold(breakWork(), "p1", 0);
-    w = stopHold(w, "p1", 20_000); // 66% → 50%
-    w = startHold(w, "p1", 25_000);
-    expect(completionAt(w)).toBe(25_000 + BREAK_TIME_MS * (1 - cp));
+    w = stopHold(w, "p1", (BREAK_TIME_MS * 2) / 3); // 66% → 50%
+    w = startHold(w, "p1", BREAK_TIME_MS);
+    expect(completionAt(w)).toBeCloseTo(BREAK_TIME_MS + BREAK_TIME_MS * (1 - cp), 6);
   });
   it("누르고 있지 않은 사람이 떼면 아무 변화 없음", () => {
     const w = startHold(breakWork(), "p1", 0);
@@ -71,20 +71,20 @@ describe("체크포인트 (버튼 뗌)", () => {
 describe("두 명 동시 작업", () => {
   it("기본 배수 1.0: 두 명이어도 혼자와 같은 속도", () => {
     let w = startHold(breakWork(), "p1", 0);
-    w = startHold(w, "p2", 5000);
+    w = startHold(w, "p2", BREAK_TIME_MS / 4);
     expect(completionAt(w)).toBe(BREAK_TIME_MS);
   });
   it("배수 2.0이면 두 명일 때 두 배 빠름", () => {
     const rules = { ...DEFAULT_WORK_RULES, multiSpeed: 2 };
     let w = startHold(breakWork(), "p1", 0, rules);
-    w = startHold(w, "p2", 10_000, rules); // 10초에 1/3, 남은 2/3를 두 배 속도로 → 10초
-    expect(completionAt(w, rules)).toBe(20_000);
+    w = startHold(w, "p2", BREAK_TIME_MS / 2, rules); // 절반에서 둘째가 붙음, 남은 절반을 두 배 속도로
+    expect(completionAt(w, rules)).toBeCloseTo((BREAK_TIME_MS * 3) / 4, 6);
   });
   it("한 명이 떼도 다른 한 명이 누르고 있으면 체크포인트 초기화 없이 계속 진행", () => {
     let w = startHold(breakWork(), "p1", 0);
     w = startHold(w, "p2", 0);
-    w = stopHold(w, "p1", 6000);
-    expect(w.progress).toBeCloseTo(6000 / BREAK_TIME_MS, 9);
+    w = stopHold(w, "p1", BREAK_TIME_MS / 5);
+    expect(w.progress).toBeCloseTo(0.2, 9);
     expect(w.holders).toEqual(["p2"]);
     expect(completionAt(w)).toBe(BREAK_TIME_MS);
   });
