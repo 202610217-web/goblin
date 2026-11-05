@@ -85,6 +85,22 @@ describe("NEON DISTRICT 방 흐름", () => {
     host.stop();
   });
 
+  it("라운드 시작 전부터 방향키를 누르고 있으면 준비 시간이 되자마자 걷는다", async () => {
+    const host = new HostRoom("WALK", { DEBUG_COMMANDS: "true" });
+    const a = fakePeer();
+    host.addPeer(a, "P2P");
+    await run(0);
+    a.push({ t: "join", nickname: "a" }); await run(1);
+    a.push({ t: "set_map", map: "NEON" }); await run(1);
+    a.push({ t: "start_practice" }); await run(1);
+    a.push({ t: "move", a: 8, s: 1 }); // 직업 선택 중에 북쪽 키
+    await run(CLASS_SELECT_MS + 500);
+    const body = last(a, "room_state").players[0].body;
+    expect(body.a).toBe(8);
+    expect(simulate(body, Date.now()).y).toBeGreaterThan(NEON_SPAWNS.atk[0]!.y + 1);
+    host.stop();
+  });
+
   it("A/B 체력은 따로: A를 부수면 공격팀 즉시 승리, B는 그대로 멈추고 더 부술 수 없다", async () => {
     const { host, a, b, c, id } = await neonRoom();
     await run(PREP_MS);

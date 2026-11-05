@@ -1035,6 +1035,7 @@ export class GameRoom extends DurableObject<Env> {
         st.players.filter((p) => p.team === team).forEach((p, i) => {
           p.c = resetForRound(p.c, maxHp(p)); // 직업 선택 후 첫 라운드에서 고른 직업 체력이 적용된다
           p.body = spawnBody(team, i, now, st);
+          this.refreshMotion(p, now); // NEON 준비 시간은 이동 가능: 누르고 있던 방향으로 바로 출발
         });
       }
     } else {
