@@ -8,7 +8,7 @@ import { findAimTarget } from "../../shared/aim";
 // 서버와 같은 메시지 형식/규칙 수치를 그대로 쓴다 (타입은 빌드 때 지워진다)
 import type { Phase, PublicPlayer, RoomStateMessage, ServerMessage } from "../../server/src/protocol";
 import { canStartMatch } from "../../server/src/phase";
-import { CLASSES, KILL_TARGET, SKILLS, attackCooldownMs } from "../../shared/classes";
+import { CLASSES, KILL_TARGET, SKILLS, ULTS, attackCooldownMs } from "../../shared/classes";
 import { CONFIG } from "./config";
 import { Input } from "./input";
 import { Net } from "./net";
@@ -47,7 +47,7 @@ interface Actor {
 }
 
 const world = new World3D($("stage"));
-const input = new Input($("touch"), $("stickBase"), $("stickKnob"), { jump: $("jumpBtn"), attack: $("attackBtn"), crouch: $("crouchBtn"), skill: $("skillBtn") });
+const input = new Input($("touch"), $("stickBase"), $("stickKnob"), { jump: $("jumpBtn"), attack: $("attackBtn"), crouch: $("crouchBtn"), skill: $("skillBtn"), ult: $("ultBtn") });
 const net = new Net(SERVER_URL);
 
 let myId: string | null = null;
@@ -308,6 +308,9 @@ net.onMessage = (m) => {
       break;
     case "swing":
       onSwing(m.by, m.target, m.damage);
+      break;
+    case "ult":
+      world.addUlt(m.x, m.y, m.z, m.serverTime);
       break;
     case "shot":
       onShot(m as Extract<ServerMessage, { t: "shot" }>);
@@ -695,6 +698,15 @@ function renderButtons(now: number) {
   $("attackBtn").classList.toggle("cooling", cd > 0 || !movable());
   setText("attackLabel", cd > 0 ? (cd / 1000).toFixed(1) : mine.cls === "JAVELIN" ? "던지기" : mine.cls === "GOBLIN" ? "찌르기" : classOf(mine).ranged ? "쏘기" : "타격");
   $("attackCd").style.height = `${(cd / cooldown) * 100}%`;
+  // 궁극기 버튼: 궁극기 있는 직업만. 게이지(%)만큼 테두리가 차고, 100%면 빛난다
+  const ult = ULTS[mine.cls];
+  $("ultBtn").classList.toggle("hidden", !ult);
+  if (ult) {
+    const p = Math.floor(mine.combat.ult ?? 0);
+    $("ultBtn").style.setProperty("--p", String(p));
+    $("ultBtn").classList.toggle("ready", p >= 100 && movable());
+    setText("ultLabel", p >= 100 ? ult.name : `${p}%`);
+  }
   // 스킬 버튼: 스킬 있는 직업만. 쓰는 중이면 남은 시간, 쿨타임이면 다시 쓸 때까지 남은 시간
   const skill = SKILLS[mine.cls];
   $("skillBtn").classList.toggle("hidden", !skill);
@@ -796,6 +808,8 @@ function frame() {
     $("crouchBtn").classList.toggle("on", !!m.body.k);
     // 4-2) 스킬 (쿨타임·적용은 서버가 판단, 결과는 room_state/move로 온다)
     if (input.consumeSkill() && movable() && myNormal() && SKILLS[m.info.cls] && now >= (m.info.combat.skillReadyAt ?? 0)) net.send({ t: "skill" });
+    // 4-3) 궁극기 (게이지 100%, 앞쪽 범위 안 적 확인은 서버가 한다)
+    if (input.consumeUlt() && movable() && myNormal() && ULTS[m.info.cls] && (m.info.combat.ult ?? 0) >= 100) net.send({ t: "ult", yaw: m.face });
     // 5) 타격 (1회 = 메시지 1개). 원거리는 조준점(카메라) 방향, 근접은 캐릭터가 바라보는 방향으로. 판정은 서버가 같은 방향으로 한다
     if (input.consumeAttack()) attackBufferedUntil = now + CONFIG.ATTACK_BUFFER_MS;
     if (now <= attackBufferedUntil) {
@@ -852,6 +866,7 @@ function frame() {
   }
   if (!watch) world.updateCamera(24, 14 - 8, 0); // 입장 전: 맵 가운데를 비춤
   world.updateArrows(now);
+  world.updateUlts(now);
   world.render();
   for (const a of actors.values()) a.view.placeLabel(world.camera, w, h);
 

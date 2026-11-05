@@ -85,14 +85,14 @@ export function inReach(a: Body, b: Body, range: number, maxDz: number): boolean
  * 여러 명이면 조준 방향에 가장 가까운(각도가 작은, 같으면 더 가까운) 1명. 몸이 겹칠 만큼 붙은 앞쪽 상대가 가장 우선. 없으면 null.
  * (pitch는 받지만 쓰지 않는다: 근접 판정은 수평 방향만 본다)
  */
-export function findAimTarget<T extends { id: string; body: Body }>(attacker: Body, yaw: number, _pitch: number, candidates: T[]): T | null {
+export function findAimTarget<T extends { id: string; body: Body }>(attacker: Body, yaw: number, _pitch: number, candidates: T[], range: number = AIM.ATTACK_RANGE): T | null {
   const H = PHYS.PLAYER_HALF;
   const chest = PHYS.PLAYER_HEIGHT / 2;
   let best: T | null = null;
   let bestAngle = Infinity, bestDist = Infinity;
   for (const c of candidates) {
     const b = c.body;
-    if (!inReach(attacker, b, AIM.ATTACK_RANGE, AIM.ATTACK_MAX_HEIGHT_DIFF)) continue;
+    if (!inReach(attacker, b, range, AIM.ATTACK_MAX_HEIGHT_DIFF)) continue;
     const dx = b.x - attacker.x, dy = b.y - attacker.y;
     const dist = Math.hypot(dx, dy);
     const ahead = dx * Math.cos(yaw) + dy * Math.sin(yaw);

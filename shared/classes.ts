@@ -45,6 +45,13 @@ export const SKILLS: Partial<Record<ClassId, {
   JAVELIN: { name: "발 묶기", durationMs: 10_000, cooldownMs: 15_000, slowMs: 2_000, slowMul: 0.5 },
 };
 
+/** 궁극기 게이지: 내가 준 피해 1당 0.5% (피해 200이면 100%). 100%가 되면 쓸 수 있고, 쓰면 0% */
+export const ULT_PER_DAMAGE = 0.5;
+/** 궁극기 (없는 직업은 버튼이 숨는다). 기사: 앞쪽(양옆 30°) range m 안의 적 한 명에게 하늘에서 큰 칼을 내리꽂는다 */
+export const ULTS: Partial<Record<ClassId, { name: string; damage: number; range: number }>> = {
+  KNIGHT: { name: "하늘 검", damage: 50, range: 4 },
+};
+
 /** 지금 공격 쿨다운 (궁수 스킬 중이면 짧아짐). 서버 판정과 화면이 같은 값을 쓴다 */
 export function attackCooldownMs(cls: ClassId, skillUntil: number | undefined, now: number): number {
   const s = SKILLS[cls];

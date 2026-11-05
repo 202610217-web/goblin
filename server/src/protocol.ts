@@ -33,6 +33,8 @@ export type ClientMessage =
   | { t: "attack"; yaw: number; pitch: number }
   /** 직업 스킬 (기사 이속 증가, 궁수 공속 증가) */
   | { t: "skill" }
+  /** 궁극기 (게이지 100%일 때). yaw = 캐릭터가 바라보는 방향 */
+  | { t: "ult"; yaw: number }
   /** 경기 종료 화면에서 "다시 하기" → 로비로 돌아가 다시 준비 */
   | { t: "rematch" }
   /** 로비: 빈자리를 연습용 더미로 채우기 / 더미 모두 빼기 */
@@ -127,6 +129,7 @@ export type ErrorCode =
   | "debug_disabled"
   | "cannot_attack"
   | "cannot_skill"
+  | "cannot_ult"
   | "not_owner";
 
 export type ServerMessage =
@@ -139,6 +142,8 @@ export type ServerMessage =
   /** 개발용 사용량 카운터 (이 DO가 깨어난 뒤부터) */
   | { t: "debug_stats"; stats: UsageStats }
   /** 누군가 타격했을 때 (target = 맞은 사람, 빗나가면 null). 체력 변화·킬은 함께 오는 room_state로 반영 */
+  /** 궁극기가 떨어짐 (화면 효과용). 데미지는 swing으로 따로 온다 */
+  | { t: "ult"; by: string; target: string; x: number; y: number; z: number; serverTime: number }
   | { t: "swing"; by: string; target: string | null; serverTime: number; /** 실제로 들어간 데미지 (뒤치기 1.5배 포함) */ damage: number }
   /** 궁수가 쐈을 때 (화면이 같은 화살을 그림). at = 쏜 서버 시각. 맞으면 swing(target)이 따로 온다 */
   | { t: "shot"; by: string; origin: Vec3; dir: Vec3; at: number; speed: number; range: number }
@@ -185,6 +190,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return { t: "attack", yaw: m.yaw, pitch: m.pitch };
     case "skill":
       return { t: "skill" };
+    case "ult":
+      return typeof m.yaw === "number" && Number.isFinite(m.yaw) ? { t: "ult", yaw: m.yaw } : null;
     case "rematch":
       return { t: "rematch" };
     case "add_bots":

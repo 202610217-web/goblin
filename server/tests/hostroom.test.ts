@@ -136,6 +136,35 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     host.stop();
   });
 
+  it("궁극기: 준 피해 1당 0.5% 차고, 100%면 앞쪽 4m 안 적에게 50 데미지 + ult 방송, 쓰면 0%", async () => {
+    const host = new HostRoom("ULTI", { DEBUG_COMMANDS: "true" });
+    const a = fakePeer(), b = fakePeer();
+    host.addPeer(a, "HOST"); host.addPeer(b, "P2P");
+    await tick();
+    a.push({ t: "join", nickname: "기사" }); b.push({ t: "join", nickname: "적" });
+    await tick(5);
+    a.push({ t: "start_practice" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "COUNTDOWN" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "PLAY" }); await tick(5);
+    const aId = last(a, "welcome").playerId, bId = last(b, "welcome").playerId;
+    const me = (id: string) => last(a, "room_state").players.find((p: any) => p.id === id);
+    a.push({ t: "debug_teleport", x: 10, y: 2 }); b.push({ t: "debug_teleport", x: 11.5, y: 2 }); await tick(5);
+    a.push({ t: "ult", yaw: 0 }); await tick(5);
+    expect(last(a, "error").code).toBe("cannot_ult"); // 아직 0%
+    a.push({ t: "attack", yaw: 0, pitch: 0.3 }); await tick(5);
+    expect(me(aId).combat.ult).toBe(CLASSES.KNIGHT.damage * 0.5);
+    // 게이지를 가득 채운 상태로 (실제로는 피해 200)
+    (host as any).room.state.players.find((p: any) => p.id === aId).c.ult = 100;
+    b.push({ t: "debug_teleport", x: 13.5, y: 2 }); await tick(5); // 3.5m: 일반 타격(2m)은 안 닿지만 궁극기(4m)는 닿음
+    const hp0 = me(bId).combat.hp;
+    a.push({ t: "ult", yaw: 0 }); await tick(5);
+    expect(last(b, "ult")).toMatchObject({ by: aId, target: bId });
+    expect(last(a, "swing")).toMatchObject({ target: bId, damage: 50 });
+    expect(me(bId).combat.hp).toBe(hp0 - 50);
+    expect(me(aId).combat.ult).toBe(0); // 궁극기 피해로는 다시 안 참
+    host.stop();
+  });
+
   it("고블린이 등 뒤에서 찌르면 1.5배 (swing에 실제 데미지), 앞에서는 기본 데미지", async () => {
     const host = new HostRoom("BACK", { DEBUG_COMMANDS: "true" });
     const a = fakePeer(), b = fakePeer();

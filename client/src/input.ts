@@ -17,6 +17,7 @@ export class Input {
   private crouchQueued = false;
   private attackQueued = false;
   private skillQueued = false;
+  private ultQueued = false;
 
   // 터치 상태 (각 컨트롤은 처음 잡은 포인터 id만 추적)
   private stickId: number | null = null;
@@ -30,7 +31,7 @@ export class Input {
     private touchLayer: HTMLElement,
     private stickBase: HTMLElement,
     private stickKnob: HTMLElement,
-    buttons: { jump: HTMLElement; attack: HTMLElement; crouch: HTMLElement; skill: HTMLElement },
+    buttons: { jump: HTMLElement; attack: HTMLElement; crouch: HTMLElement; skill: HTMLElement; ult: HTMLElement },
   ) {
     touchLayer.addEventListener("pointerdown", (e) => this.onDown(e));
     touchLayer.addEventListener("pointermove", (e) => this.onMove(e));
@@ -41,6 +42,7 @@ export class Input {
     bindButton(buttons.crouch, () => { if (this.enabled) this.crouchQueued = true; }, () => {});
     bindButton(buttons.attack, () => { if (this.enabled) this.attackQueued = true; }, () => {});
     bindButton(buttons.skill, () => { if (this.enabled) this.skillQueued = true; }, () => {});
+    bindButton(buttons.ult, () => { if (this.enabled) this.ultQueued = true; }, () => {});
 
     // 키보드 (개발/테스트용 보조 입력): WASD 이동, Space 점프, C 앉기, J 타격, Tab 점수판, Q/E/방향키 카메라
     window.addEventListener("keydown", (e) => {
@@ -50,6 +52,7 @@ export class Input {
         if (k === " " && this.enabled) this.jumpQueued = true;
         if (k === "j" && this.enabled) this.attackQueued = true;
         if (k === "f" && this.enabled) this.skillQueued = true;
+        if (k === "r" && this.enabled) this.ultQueued = true;
         if (k === "c" && this.enabled) this.crouchQueued = true;
         if (k === "tab") this.onToggleScoreboard();
       }
@@ -79,6 +82,7 @@ export class Input {
     this.jumpQueued = false;
     this.crouchQueued = false;
     this.skillQueued = false;
+    this.ultQueued = false;
     this.attackQueued = false;
   }
 
@@ -110,6 +114,12 @@ export class Input {
     const j = this.jumpQueued;
     this.jumpQueued = false;
     return j;
+  }
+
+  consumeUlt(): boolean {
+    const u = this.ultQueued;
+    this.ultQueued = false;
+    return u;
   }
 
   consumeSkill(): boolean {

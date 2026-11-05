@@ -532,6 +532,55 @@ export class World3D {
     this.arrows.splice(i, 1);
   }
 
+  // ---------- 궁극기 (기사 하늘 검): 반투명 금빛 큰 칼이 떨어져 꽂히고 충격파 고리가 퍼진다 ----------
+  private ults: { g: THREE.Group; mats: THREE.MeshBasicMaterial[]; ring: THREE.Mesh; glow: THREE.Mesh; at: number }[] = [];
+
+  /** 서버 시각 at에 (x, y, z) 위로 칼이 떨어지기 시작한다 */
+  addUlt(x: number, y: number, z: number, at: number) {
+    const mat = () => new THREE.MeshBasicMaterial({ color: 0xffd65a, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false });
+    const mats = [mat(), mat(), mat()];
+    const g = new THREE.Group();
+    // 칼 (끝이 아래, 길이 약 4m, 넓은 면이 카메라 쪽): 날 + 끝 + 가드 + 손잡이
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.7, 2.6, 0.1), mats[0]); blade.position.y = 0.8 + 1.3;
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.8, 4).rotateX(Math.PI).rotateY(Math.PI / 4), mats[0]); tip.scale.z = 0.2; tip.position.y = 0.4;
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.24, 0.24), mats[1]); guard.position.y = 3.5;
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.7, 8), mats[1]); grip.position.y = 3.95;
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 1.1, 12, 16, 1, true), mats[2]); beam.position.y = 6; // 내려오는 빛기둥
+    g.rotation.y = Math.atan2(Math.cos(this.yaw), -Math.sin(this.yaw)); // 칼 넓은 면이 지금 카메라를 보게
+    g.add(blade, tip, guard, grip, beam);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 48).rotateX(-Math.PI / 2), mat());
+    ring.position.y = 0.05;
+    // 빛 번쩍임: 조명을 새로 넣으면 모든 재질이 다시 컴파일돼 멈칫하므로, 더하기 혼합 원판으로 흉내
+    const glow = new THREE.Mesh(new THREE.CircleGeometry(1.8, 32).rotateX(-Math.PI / 2), mat());
+    glow.position.y = 0.04;
+    const root = new THREE.Group();
+    World3D.toThree(x, y, z, root.position);
+    root.add(g, ring, glow);
+    this.scene.add(root);
+    this.ults.push({ g: root, mats: [...mats, ring.material as THREE.MeshBasicMaterial, glow.material as THREE.MeshBasicMaterial], ring, glow, at });
+  }
+
+  updateUlts(serverNow: number) {
+    const FALL = 220, END = 1100;
+    this.ults = this.ults.filter((u) => {
+      const t = serverNow - u.at;
+      if (t > END) { this.scene.remove(u.g); u.mats.forEach((m) => m.dispose()); u.g.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose(); }); return false; }
+      const sword = u.g.children[0]!;
+      const f = Math.min(1, Math.max(0, t) / FALL);
+      sword.position.y = 7 * (1 - f * f) - 0.4 * f; // 가속하며 떨어져 땅에 박힘
+      const after = Math.max(0, t - FALL) / (END - FALL); // 꽂힌 뒤 0→1
+      const fade = 1 - after;
+      u.mats[0]!.opacity = u.mats[1]!.opacity = 0.75 * fade;
+      u.mats[2]!.opacity = 0.22 * (t < FALL ? f : fade * fade);
+      u.ring.visible = t >= FALL;
+      u.ring.scale.setScalar(0.6 + after * 4);
+      u.mats[3]!.opacity = 0.9 * fade;
+      u.glow.visible = t >= FALL;
+      u.mats[4]!.opacity = 0.35 * fade * fade;
+      return true;
+    });
+  }
+
   updateArrows(serverNow: number) {
     this.arrows = this.arrows.filter((a) => {
       const d = (a.speed * Math.max(0, serverNow - a.at)) / 1000;

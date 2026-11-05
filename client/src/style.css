@@ -449,6 +449,12 @@ button.iconBtn { position: fixed; width: 40px; height: 40px; min-height: 40px; m
 #skillBtn.on { background: rgba(232, 234, 237, 0.24); border-color: var(--fg); }
 #skillBtn.cooling .ic { opacity: 0.35; }
 #skillBtn.cooling span { font: 600 15px var(--mono); color: var(--fg); }
+/* 궁극기: 스킬 위. 게이지만큼 테두리가 금색으로 차고, 100%면 빛남 */
+#ultBtn { right: 18px; bottom: 194px; width: 68px; height: 68px; border: none; background: conic-gradient(#ffc940 calc(var(--p, 0) * 1%), rgba(232, 234, 237, 0.18) 0); }
+#ultBtn::before { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: rgba(11, 13, 16, 0.78); z-index: -1; }
+#ultBtn { isolation: isolate; }
+#ultBtn.ready { box-shadow: 0 0 18px 4px rgba(255, 201, 64, 0.75); color: #ffd65a; }
+#ultBtn.ready span { color: #ffd65a; }
 #skillCd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(232, 234, 237, 0.12); }
 
 /* 폰처럼 작은 화면: 패널을 한 줄씩 */

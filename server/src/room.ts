@@ -23,7 +23,7 @@ import { type Body, angleToRad, groundHeightAt, makeBody, roundBody, simulate, w
 import { MAPS, PHYS } from "../../shared/world";
 import { NEON_SPAWNS } from "../../shared/neon";
 import { findAimTarget } from "../../shared/aim";
-import { ARROW, CLASSES, CLASS_IDS, type ClassId, SKILLS, STEALTH, attackCooldownMs } from "../../shared/classes";
+import { ARROW, CLASSES, CLASS_IDS, type ClassId, SKILLS, STEALTH, ULTS, ULT_PER_DAMAGE, attackCooldownMs } from "../../shared/classes";
 import { arrowSegmentHit, makeArrow } from "../../shared/arrow";
 import { type BotPlan, decide, msToWaypoint, planFor } from "./bots";
 import { inputTime } from "./lag";
@@ -421,6 +421,24 @@ export class GameRoom extends DurableObject<Env> {
         return;
       }
 
+      case "ult": {
+        const ult = ULTS[player.cls ?? "KNIGHT"];
+        if (!ult || !isCombatPhase(st.phase) || player.c.state !== "NORMAL") return this.sendError(ws, "cannot_ult", "지금은 궁극기를 쓸 수 없어요");
+        if ((player.c.ult ?? 0) < 100) return this.sendError(ws, "cannot_ult", "궁극기 게이지가 아직 다 안 찼어요");
+        const me = simulate(player.body, now);
+        const candidates = st.players
+          .filter((p) => p.team !== player.team && isHittable(p.c, now))
+          .map((p) => ({ id: p.id, body: simulate(p.body, now), p }));
+        const hit = findAimTarget(me, msg.yaw, 0, candidates, ult.range);
+        if (!hit) return this.sendError(ws, "cannot_ult", `앞쪽 ${ult.range}m 안에 적이 없어요`); // 게이지는 그대로
+        player.c = endStealth({ ...player.c, ult: 0 }, now);
+        this.broadcast({ t: "ult", by: player.id, target: hit.id, x: hit.body.x, y: hit.body.y, z: hit.body.z, serverTime: now });
+        this.landHit(player.id, hit.p, now, ult.damage, false);
+        await this.commit();
+        this.broadcastRoomState(now);
+        return;
+      }
+
       case "debug_score":
         if (this.env.DEBUG_COMMANDS !== "true") return this.sendError(ws, "debug_disabled", "디버그 명령이 꺼져 있어요");
         st.score = { A: msg.A, B: msg.B };
@@ -665,11 +683,16 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   /** 맞은 뒤 처리 (근접/화살 공통): 체력, 죽으면 킬 점수·부활 예약, swing 방송, 15킬이면 경기 끝 */
-  private landHit(by: string, target: PlayerRecord | null, now: number, damage: number) {
+  /** charge = 준 피해만큼 궁극기 게이지를 채울지 (궁극기 자신은 안 채움) */
+  private landHit(by: string, target: PlayerRecord | null, now: number, damage: number, charge = true) {
     const st = this.state!;
     if (target) {
       const wasAlive = target.c.state === "NORMAL";
+      const hp0 = target.c.hp;
       target.c = applyHit(target.c, now, damage);
+      const dealt = hp0 - target.c.hp;
+      const attacker = charge && dealt > 0 ? st.players.find((p) => p.id === by) : undefined;
+      if (attacker) attacker.c = { ...attacker.c, ult: Math.min(100, (attacker.c.ult ?? 0) + dealt * ULT_PER_DAMAGE) };
       if (wasAlive && target.c.state === "DEAD") {
         const killer = st.players.find((p) => p.id === by);
         if (killer) {
@@ -959,6 +982,7 @@ export class GameRoom extends DurableObject<Env> {
         skillUntil: p.c.skillUntil,
         skillReadyAt: p.c.skillReadyAt,
         slowUntil: p.c.slowUntil,
+        ult: p.c.ult ?? 0,
         stealthUntil: p.c.stealthUntil,
         stealthReadyAt: p.c.stealthReadyAt,
       },
