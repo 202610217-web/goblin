@@ -155,3 +155,14 @@ describe("NEON DISTRICT 더미 길 (격자 길 찾기 → 실제 물리로 걸�
     expect(planFor("A", "COUNTDOWN", "A", 0, "NEON").waypoints).toEqual([]);
   });
 });
+
+describe("NEON 수리 단계 더미", () => {
+  it("부서진 건물로: 수비 더미는 수리(hold), 공격 더미는 막으러 감", () => {
+    const def = planFor("B", "REPAIR", "A", 0, "NEON", undefined, "B");
+    const atk = planFor("A", "REPAIR", "A", 0, "NEON", undefined, "B");
+    expect(def).toMatchObject({ site: "B", hold: true });
+    expect(atk).toMatchObject({ site: "B", hold: false });
+    expect(def.waypoints.length).toBeGreaterThan(0);
+    expect(atk.waypoints.length).toBeGreaterThan(0);
+  });
+});

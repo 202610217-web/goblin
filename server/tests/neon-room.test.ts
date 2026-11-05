@@ -5,7 +5,7 @@ import { HostRoom, type PeerLink } from "../../client/src/host/hostRoom";
 import { NEON_SPAWNS } from "../../shared/neon";
 import { simulate } from "../../shared/sim";
 import { BARRIERS, SITES } from "../../shared/world";
-import { ATTACK_MS, BREAK_TIME_MS, CLASS_SELECT_MS, PREP_MS } from "../src/constants";
+import { ATTACK_MS, BREAK_TIME_MS, CLASS_SELECT_MS, PREP_MS, REPAIR_MS, REPAIR_TIME_MS } from "../src/constants";
 
 function fakePeer(): PeerLink & { got: any[]; push(o: unknown): void } {
   const p = {
@@ -101,14 +101,14 @@ describe("NEON DISTRICT 방 흐름", () => {
     host.stop();
   });
 
-  it("A/B 체력은 따로: A를 부수면 공격팀 즉시 승리, B는 그대로 멈추고 더 부술 수 없다", async () => {
-    const { host, a, b, c, id } = await neonRoom();
+  it("A/B 체력은 따로: A가 부서지면 A만 수리 단계, B는 그대로 멈춤. 수비팀이 고치면 수비팀 승리", async () => {
+    const { host, a, b, c, d, id } = await neonRoom();
     await run(PREP_MS);
     a.push({ t: "debug_teleport", ...frontOf("A") }); await run(1);
     c.push({ t: "debug_teleport", ...frontOf("B") }); await run(1);
     b.push({ t: "debug_teleport", ...frontOf("A", 1.5) }); await run(1);
     b.push({ t: "hold_start" }); await run(1);
-    expect(last(b, "error").code).toBe("cannot_work"); // 수비팀은 부술 수 없음
+    expect(last(b, "error").code).toBe("cannot_work"); // 공격 단계에 수비팀은 부술 수 없음
     a.push({ t: "hold_start" }); await run(BREAK_TIME_MS / 4);
     let sites = last(a, "work").sites;
     expect(sites.A.holders).toEqual([id(a)]);
@@ -116,24 +116,33 @@ describe("NEON DISTRICT 방 흐름", () => {
     expect(sites.B.progress).toBe(0);
     c.push({ t: "hold_start" }); await run(1);
     expect(last(a, "work").sites.B.holders).toEqual([id(c)]);
-    await run((BREAK_TIME_MS * 3) / 4); // A 완료 (B는 약 3/4)
-    const st = last(a, "room_state");
-    expect(st.phase).toBe("ROUND_END");
-    expect(st.roundEnd).toEqual({ winner: "A", reason: "site_destroyed", site: "A" });
-    expect(st.score).toEqual({ A: 1, B: 0 });
-    expect(st.sites.A.progress).toBe(1);
+    await run((BREAK_TIME_MS * 3) / 4); // A 파괴 (B는 약 3/4)
+    let st = last(a, "room_state");
+    expect(st.phase).toBe("REPAIR");
+    expect(st.roundEnd).toBeNull();
+    expect(st.sites.A).toMatchObject({ kind: "REPAIR", progress: 0, holders: [] });
+    expect(st.sites.B.kind).toBeNull();
     const bLeft = st.sites.B.progress;
     expect(bLeft).toBeGreaterThan(0.7);
     expect(bLeft).toBeLessThan(0.8);
-    c.push({ t: "hold_start" }); await run(2_000);
+    // 공격팀은 수리 단계에 아무 건물도 못 건드리고, 수비팀은 B(안 부서진 건물)는 못 고친다
+    c.push({ t: "hold_start" }); await run(1);
     expect(last(c, "error").code).toBe("cannot_work");
-    expect(last(a, "room_state").sites.B.progress).toBe(bLeft);
-    // 모두 같은 결과를 받는다
+    d.push({ t: "debug_teleport", ...frontOf("B") }); await run(1);
+    d.push({ t: "hold_start" }); await run(1);
+    expect(last(d, "error").code).toBe("cannot_work");
+    b.push({ t: "hold_start" }); await run(REPAIR_TIME_MS + 1);
+    st = last(a, "room_state");
+    expect(st.phase).toBe("ROUND_END");
+    expect(st.roundEnd).toEqual({ winner: "B", reason: "repair_success", site: "A" });
+    expect(st.score).toEqual({ A: 0, B: 1 });
+    expect(st.sites.A.progress).toBe(0); // 다 고쳐짐 (멈춘 사이트 progress = 부서진 정도)
+    expect(st.sites.B.progress).toBe(bLeft);
     for (const p of [b, c]) expect(last(p, "room_state").roundEnd).toEqual(st.roundEnd);
     host.stop();
   });
 
-  it("A와 B가 같은 순간에 다 부서져도 승리는 한 번만", async () => {
+  it("A와 B가 같은 순간에 다 부서져도 수리 단계는 한 번, 못 고치면 공격팀 승리", async () => {
     const { host, a, c } = await neonRoom();
     await run(PREP_MS);
     a.push({ t: "debug_teleport", ...frontOf("A") });
@@ -141,10 +150,15 @@ describe("NEON DISTRICT 방 흐름", () => {
     await run(1);
     a.push({ t: "hold_start" }); c.push({ t: "hold_start" }); // 같은 시각에 시작 → 같은 시각에 완료
     await run(BREAK_TIME_MS + 1_000);
-    const st = last(a, "room_state");
+    let st = last(a, "room_state");
+    expect(st.phase).toBe("REPAIR");
+    expect([st.sites.A.kind, st.sites.B.kind].filter((k) => k === "REPAIR")).toHaveLength(1);
+    await run(REPAIR_MS);
+    st = last(a, "room_state");
     expect(st.phase).toBe("ROUND_END");
     expect(st.score).toEqual({ A: 1, B: 0 });
     expect(st.history).toHaveLength(1);
+    expect(st.roundEnd.reason).toBe("repair_fail");
     expect(["A", "B"]).toContain(st.roundEnd.site);
     host.stop();
   });

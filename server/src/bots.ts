@@ -43,8 +43,14 @@ const GUARD: Record<Team, { x: number; ys: [number, number] }> = {
  * - REPAIR 공격팀: 상대 집 앞으로 가서 수리를 막기(싸우기)
  * slot = 팀 안에서 몇 번째 더미인지 (0/1, 길을 나눠 쓴다)
  */
-export function planFor(team: Team, phase: Phase, attackingTeam: Team, slot: number, map: MapId = "CLASSIC", from?: Point): BotPlan {
+export function planFor(team: Team, phase: Phase, attackingTeam: Team, slot: number, map: MapId = "CLASSIC", from?: Point, repairSite?: SiteId): BotPlan {
   const s = slot % 2;
+  if (map === "NEON" && phase === "REPAIR" && repairSite) {
+    // 수리 단계: 둘 다 부서진 건물로. 수비팀은 수리, 공격팀은 막으러 가서 싸움
+    const attacker = team === attackingTeam;
+    const start = from ?? NEON_SPAWNS[attacker ? "atk" : "def"][s]!;
+    return { waypoints: neonPath(start, repairSite), idx: 0, hold: !attacker, site: repairSite };
+  }
   if (map === "NEON") {
     // 0번은 A, 1번은 B 사이트. 공격팀은 준비 시간에는 대기, 공격 단계에 건물 앞까지 가서 부순다. 수비팀은 그 건물 앞을 지킨다
     const site: SiteId = s === 0 ? "A" : "B";

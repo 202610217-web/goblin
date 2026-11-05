@@ -30,7 +30,7 @@
 ### 1-2. 라운드 흐름 (server/src/phase.ts, room.ts)
 `LOBBY → CLASS_SELECT(5초, 경기 시작 때 한 번) → COUNTDOWN(기본 맵 10초 / NEON 15초) → ATTACK(120초) → (기본 맵에서 부수기 완료 시) REPAIR(60초) → ROUND_END(5초) → 다음 라운드 COUNTDOWN … → MATCH_END`
 
-- NEON DISTRICT 맵에는 REPAIR가 없다: A/B 건물 중 하나가 부서지면 바로 ROUND_END.
+- NEON DISTRICT도 REPAIR가 있다(사용자 요청으로 추가): A/B 중 먼저 부서진 건물 하나만 수리 대상, 다른 건물은 그대로 멈춤. 수리 성공 = 수비팀, 시간 초과·수비팀 전멸 = 공격팀.
 
 | 라운드 종료 이유 (`RoundEndReason`) | 승점 |
 |---|---|
@@ -39,7 +39,7 @@
 | `repair_fail` 수리 시간 초과 | 공격팀 +1 |
 | `attackers_wiped` ATTACK 중 공격팀 전원 기절/사망 | 수비팀 +1 (즉시) |
 | `defenders_wiped` REPAIR 중 수비팀 전원 기절/사망 | 공격팀 +1 (즉시) |
-| `site_destroyed` (NEON) A 또는 B 건물 파괴 | 공격팀 +1 (즉시, `roundEnd.site`에 어느 건물인지) |
+| `site_destroyed` | 지금은 쓰지 않음(NEON 수리 단계 추가 전 이유). NEON은 위 repair_* 이유를 쓰고 `roundEnd.site`에 건물 표시 |
 
 - NEON의 시간 초과는 `break_timeout`, 공격팀 전멸은 `attackers_wiped`로 기존과 같다.
 
@@ -129,7 +129,7 @@
 ### 3-2. 공격과 방어 시스템
 **집 작업 (부수기/수리)** — `server/src/work.ts`
 - 기본 맵: ATTACK 단계에 공격팀만 "부수기", REPAIR 단계에 수비팀만 "수리". 대상은 둘 다 **수비팀 집**.
-- NEON: ATTACK 단계에 공격팀이 A 또는 B 건물을 부순다(`isNearSite`). 두 건물은 진행률(= 체력)을 따로 가진다(`room_state.sites`, `work` 메시지에도 `sites`). 먼저 100%가 된 건물 하나로 즉시 승리, 그 뒤 다른 건물은 작업 불가. 수리 없음. 준비 시간에는 작업·공격 불가.
+- NEON: ATTACK 단계에 공격팀이 A 또는 B 건물을 부순다(`isNearSite`). 두 건물은 진행률(= 체력)을 따로 가진다(`room_state.sites`, `work` 메시지에도 `sites`). 먼저 100%가 된 건물 하나로 REPAIR(그 건물만 `kind: REPAIR` 0%부터, 다른 건물은 `kind: null`로 멈춤). 멈춘 사이트의 progress는 늘 "부서진 정도"(수리 진행률은 1-로 바꿔 저장, `room.ts frozen`). 더미는 REPAIR에 둘 다 부서진 건물로(`planFor`의 `repairSite`). 준비 시간에는 작업·공격 불가.
 - 작업 가능: 집 벽면에서 수평 1.2m(+캐릭터 반폭) 이내, 발 높이 0.5m 이하(`isNearHouse`).
 - 혼자 부수기 4초, 수리 4초(`BREAK_TIME_MS`, `REPAIR_TIME_MS`, 사용자 요청으로 30초·20초에서 줄임). 2명 동시 속도 배수 1.0(상수로 조절).
 - 버튼을 떼면: 50% 미만 → 0%, 이상 → 50%로 되돌아감. 한 명이라도 누르고 있으면 체크포인트 적용 안 함.

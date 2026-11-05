@@ -501,7 +501,7 @@ function availableAction(): ActionKind | null {
   }
   const target = other(room.attackingTeam); // 부수기/수리 대상 = 수비팀 집 (NEON은 A/B 사이트 건물)
   const near = room.map === "NEON"
-    ? SITE_IDS.some((s) => isNearSite(s, m.body.x, m.body.y, m.body.z))
+    ? SITE_IDS.some((s) => !!room!.sites?.[s].kind && isNearSite(s, m.body.x, m.body.y, m.body.z))
     : isNearHouse(target, m.body.x, m.body.y, m.body.z);
   if (!near) return null;
   const attacker = m.team === room.attackingTeam;
@@ -650,9 +650,12 @@ function renderHud(now: number) {
       const atk = mine.team === room.attackingTeam;
       const enemy = other(mine.team);
       const prep = room.phase === "COUNTDOWN";
-      if (room.map === "NEON") {
+      const broken = room.sites ? SITE_IDS.find((s) => room!.sites![s].kind === "REPAIR") : undefined;
+      if (room.map === "NEON" && room.phase === "REPAIR" && broken) {
+        setText("hudRole", atk ? `⚔ ${broken} 건물 수리를 막으세요` : `🛡 부서진 ${broken} 건물을 고치세요`);
+      } else if (room.map === "NEON") {
         setText("hudRole", `${room.attackingTeam}팀 공격 · ${other(room.attackingTeam)}팀 수비 — ` + (atk
-          ? (prep ? "⚔ 결계가 풀리면 A 또는 B 건물을 부수세요" : "⚔ A 또는 B 건물 하나를 부수면 승리")
+          ? (prep ? "⚔ 결계가 풀리면 A 또는 B 건물을 부수세요" : "⚔ A 또는 B 건물 하나를 부수세요")
           : (prep ? "🛡 준비 시간: A/B 사이트로 가서 자리를 잡으세요" : "🛡 시간이 끝날 때까지 A·B 건물을 지키세요")));
       } else setText("hudRole", atk ? `⚔ 공격팀 — ${enemy}팀 집을 부수세요` : `🛡 수비팀 — ${mine.team}팀 집을 지키세요`);
     }
@@ -698,9 +701,10 @@ function renderSiteBars(now: number) {
   for (const id of SITE_IDS) {
     const w = sites[id];
     const p = Math.min(1, w.progress + Math.max(0, now - w.since) * w.rate);
-    const hp = Math.max(0, Math.round((1 - p) * 100));
+    const repairing = w.kind === "REPAIR"; // 수리 단계: 수리 진행률이 곧 체력
+    const hp = Math.max(0, Math.round((repairing ? p : 1 - p) * 100));
     $(`siteFill${id}`).style.width = `${hp}%`;
-    setText(`siteHp${id}`, hp === 0 ? "파괴" : `${hp}%`);
+    setText(`siteHp${id}`, repairing ? `수리 ${hp}%` : hp === 0 ? "파괴" : `${hp}%`);
     const el = box.querySelector(`.site.${id}`)!;
     el.classList.toggle("hit", w.holders.length > 0);
     el.classList.toggle("dead", hp === 0);

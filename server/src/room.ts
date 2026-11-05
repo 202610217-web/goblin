@@ -203,7 +203,9 @@ function spawnBody(team: Team, index: number, now: number, st?: { map?: MapId; a
 
 /** 작업을 그 시각 진행률로 멈춘다 (아무도 누르지 않음, 더 바뀌지 않음) */
 function frozen(w: WorkState, now: number): WorkState {
-  return { kind: null, progress: progressAt(w, now), since: now, holders: [] };
+  // 멈춘 사이트의 progress = 부서진 정도 (수리 진행률은 1 - 로 바꿔 둔다)
+  const p = progressAt(w, now);
+  return { kind: null, progress: w.kind === "REPAIR" ? 1 - p : p, since: now, holders: [] };
 }
 
 /** 지금 시각에 그 자리에 멈춘 상태 */
@@ -678,13 +680,18 @@ export class GameRoom extends DurableObject<Env> {
           // 단계 제한 시간 종료 (원래 마감 시각 기준으로 계산)
           if (st.phaseEndsAt === null || st.phaseEndsAt > now) continue;
           if (st.phase === "ATTACK") this.endRound("break_timeout", d.at); // 2분 안에 못 부숨
-          else if (st.phase === "REPAIR") this.endRound("repair_fail", d.at); // 1분 안에 못 고침
+          else if (st.phase === "REPAIR") this.endRound("repair_fail", d.at, this.repairSite() ?? undefined); // 1분 안에 못 고침
           else if (st.phase === "ROUND_END") this.advanceAfterRound(d.at);
           else this.applyPhase(nextOnTimeout(st, d.at), d.at); // COUNTDOWN → ATTACK
         } else if (d.kind === "work" && (d.key === "A" || d.key === "B")) {
-          // NEON: 먼저 부서진 건물 하나로 공격팀 즉시 승리. 단계가 바로 ROUND_END가 되므로
-          // 같은 시각에 다른 건물 마감이 있어도 아래 ATTACK 조건에서 걸러진다 (승리 판정은 한 번만)
-          if (st.phase === "ATTACK" && st.sites && isComplete(st.sites[d.key], d.at)) this.endRound("site_destroyed", d.at, d.key);
+          // NEON: 먼저 부서진 건물 하나로 REPAIR(그 건물만 수리), 수리 완료면 수비팀 승리. 단계가 바뀌면 작업 마감이
+          // 모두 지워지고 다른 건물은 멈추므로, 같은 시각에 다른 건물 마감이 있어도 한 번만 처리된다
+          const w = st.sites?.[d.key];
+          if (!w || !isComplete(w, d.at)) continue;
+          if (st.phase === "ATTACK" && w.kind === "BREAK") {
+            this.applyPhase(nextOnWorkComplete(st, "BREAK", d.at), d.at, d.key);
+            this.checkWipe(d.at); // REPAIR 시작 순간 수비팀이 이미 전멸이면 바로 종료
+          } else if (st.phase === "REPAIR" && w.kind === "REPAIR") this.endRound("repair_success", d.at, d.key);
         } else if (d.kind === "work") {
           // 집 작업 100% → 부수기 완료는 REPAIR, 수리 완료는 ROUND_END (판정 시각은 완료 예정 시각)
           const kind = st.work.kind;
@@ -724,6 +731,12 @@ export class GameRoom extends DurableObject<Env> {
   // ---------- 집 작업 ----------
   private isHolding(playerId: string): boolean {
     return (this.state?.work.holders.includes(playerId) ?? false) || this.holdingSite(playerId) !== null;
+  }
+
+  /** NEON REPAIR: 수리 중인(부서진) 사이트 */
+  private repairSite(): SiteId | null {
+    const s = this.state?.sites;
+    return s ? (s.A.kind === "REPAIR" ? "A" : s.B.kind === "REPAIR" ? "B" : null) : null;
   }
 
   /** NEON: 이 플레이어가 부수고 있는 사이트 */
@@ -869,7 +882,7 @@ export class GameRoom extends DurableObject<Env> {
       connected: player.conn === "CONNECTED",
       normal: player.c.state === "NORMAL",
       reviving: player.c.revive !== null,
-      nearTarget: st.map === "NEON" ? site !== null && !!st.sites : isNearHouse(target, body.x, body.y, body.z),
+      nearTarget: st.map === "NEON" ? site !== null && !!st.sites?.[site].kind : isNearHouse(target, body.x, body.y, body.z),
       alreadyHolding: this.isHolding(player.id),
     });
     if (reason) return reason;
@@ -999,7 +1012,8 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   /** 새 단계 상태를 적용하고, 단계에 따른 부수 효과(위치 초기화, 정지, 마감 시각)를 처리 */
-  private applyPhase(next: PhaseState, now: number) {
+  /** brokenSite = NEON에서 ATTACK→REPAIR로 넘어갈 때 부서진 건물 (그 건물만 수리 대상) */
+  private applyPhase(next: PhaseState, now: number, brokenSite?: SiteId) {
     const st = this.state!;
     const enteredNewRound = next.phase === "COUNTDOWN" && (st.phase !== "COUNTDOWN" || st.round !== next.round);
     const phaseChanged = next.phase !== st.phase || next.round !== st.round;
@@ -1008,9 +1022,11 @@ export class GameRoom extends DurableObject<Env> {
       const neon = st.map === "NEON";
       st.work = workForPhase(neon ? "LOBBY" : next.phase, now); // NEON은 사이트별 작업만 쓴다
       st.deadlines = st.deadlines.filter((d) => d.kind !== "work");
-      // NEON 사이트: 공격 단계에 새로 시작, 라운드가 끝나면 체력을 그대로 멈춘다 (부서진 뒤에는 다른 건물도 변경 불가)
+      // NEON 사이트: 공격 단계에 새로 시작, 부서지면 그 건물만 수리(0%부터), 다른 건물과 라운드 종료 때는 그대로 멈춘다
       st.sites = !neon ? null
         : next.phase === "ATTACK" ? { A: workForPhase("ATTACK", now), B: workForPhase("ATTACK", now) }
+        : next.phase === "REPAIR" && st.sites && brokenSite
+          ? { A: brokenSite === "A" ? workForPhase("REPAIR", now) : frozen(st.sites.A, now), B: brokenSite === "B" ? workForPhase("REPAIR", now) : frozen(st.sites.B, now) }
         : next.phase === "ROUND_END" && st.sites ? { A: frozen(st.sites.A, now), B: frozen(st.sites.B, now) }
         : { A: workForPhase("LOBBY", now), B: workForPhase("LOBBY", now) };
     }
@@ -1050,7 +1066,7 @@ export class GameRoom extends DurableObject<Env> {
     if (phaseChanged && canMoveIn(st.phase, st.map)) {
       for (const team of ["A", "B"] as const) {
         st.players.filter((p) => p.bot && p.team === team).forEach((p, i) => {
-          p.plan = planFor(team, st.phase, st.attackingTeam, i, st.map, simulate(p.body, now));
+          p.plan = planFor(team, st.phase, st.attackingTeam, i, st.map, simulate(p.body, now), this.repairSite() ?? undefined);
         });
       }
     }
