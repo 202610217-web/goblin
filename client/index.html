@@ -89,33 +89,21 @@
     </div>
     <p id="classTeam" class="hint"></p>
   </div>
-  <!-- 상단 HUD: 점수 · 라운드 · 남은 시간 · 집 작업 진행률 -->
+  <!-- 상단 HUD: 팀 킬 수 · 남은 시간 -->
   <div id="hud" class="hidden">
     <div class="scoreRow">
-      <div class="teamScore A"><span id="scoreA">0</span><small id="mpA" class="badge hidden">매치포인트</small></div>
+      <div class="teamScore A"><span id="scoreA">0</span></div>
       <div class="center">
         <div id="hudRound"></div>
         <div id="hudTimer"></div>
       </div>
-      <div class="teamScore B"><small id="mpB" class="badge hidden">매치포인트</small><span id="scoreB">0</span></div>
-    </div>
-    <div id="history"></div>
-    <div id="deuceBadge" class="badge hidden">듀스 · 2점 차가 나야 승리</div>
-    <!-- NEON: A/B 사이트 건물 체력 -->
-    <div id="siteBars" class="hidden">
-      <div class="site A"><b>A</b><div class="bar"><div id="siteFillA"></div></div><span id="siteHpA"></span></div>
-      <div class="site B"><b>B</b><div class="bar"><div id="siteFillB"></div></div><span id="siteHpB"></span></div>
-    </div>
-    <div id="workBar" class="hidden">
-      <div id="workLabel"></div>
-      <div class="bar"><div id="workFill"></div><div id="workCheckpoint"></div></div>
+      <div class="teamScore B"><span id="scoreB">0</span></div>
     </div>
   </div>
   <button id="scoreBtn" class="small iconBtn hidden" aria-label="점수판"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6H20M4 12H20M4 18H14"/></svg></button>
   <button id="fullscreenBtn" class="small iconBtn hidden" aria-label="전체 화면"><svg class="ic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4H9M15 4H20V9M20 15V20H15M9 20H4V15"/></svg></button>
   <div id="netStatus"></div>
   <div id="teamPanelMine" class="teamPanel left hidden"></div>
-  <div id="teamPanelEnemy" class="teamPanel right hidden"></div>
   <canvas id="minimap" class="hidden"></canvas>
   <div id="debug" class="hidden"></div>
 
@@ -123,14 +111,13 @@
   <div id="scoreboard" class="panel hidden">
     <h2>점수판</h2>
     <table>
-      <thead><tr><th>팀</th><th>닉네임</th><th>체력</th><th>기절</th><th>사망</th><th>상태</th></tr></thead>
+      <thead><tr><th>팀</th><th>닉네임</th><th>킬</th><th>데스</th><th>상태</th></tr></thead>
       <tbody id="scoreboardBody"></tbody>
     </table>
     <button id="scoreClose" class="secondary">닫기</button>
   </div>
 
-  <!-- 목표 표시 · 맞은 방향 · 알림 -->
-  <div id="objectives"></div>
+  <!-- 맞은 방향 · 알림 -->
   <div id="dmgLayer"></div>
   <div id="feed"></div>
   <!-- 조준점 -->
@@ -139,27 +126,22 @@
   <!-- 터치 조작 (왼손 = 이동, 오른손 = 행동) -->
   <div id="touch" class="hidden">
     <div id="stickBase"><div id="stickKnob"></div></div>
-    <!-- 엄지 버튼 (Figma TouchButton): 아래 줄 앉기·점프·타격, 타격 위 행동 -->
+    <!-- 엄지 버튼: 타격(모서리) 둘레에 앉기·점프 -->
     <div id="buttons">
       <div id="crouchBtn" class="gameBtn sm" aria-label="앉기"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3V14"/><path d="M6.5 8.5L12 14L17.5 8.5"/><path d="M5 18H19"/><path d="M5 21H19"/></svg></div>
       <div id="jumpBtn" class="gameBtn sm" aria-label="점프"><svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 18V5"/><path d="M6.5 10.5L12 5L17.5 10.5"/><path d="M5 21H19"/></svg></div>
       <div id="attackBtn" class="gameBtn" aria-label="타격"><svg class="ic" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 17.5L3 6V3H6L17.5 14.5"/><path d="M13 19L19 13"/><path d="M16 16L20 20"/><path d="M19 21L21 19"/></svg><span id="attackLabel">타격</span><div id="attackCd"></div></div>
-      <div id="actionBtn" class="gameBtn disabled" aria-label="행동">
-        <svg class="ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" /><circle id="actionRing" cx="50" cy="50" r="46" /></svg>
-        <svg class="ic" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4L20 10"/><path d="M11.5 6.5L17.5 12.5L15 15L9 9Z"/><path d="M10.5 13.5L4 20"/></svg><span id="actionLabel">행동</span>
-      </div>
     </div>
   </div>
 
-  <!-- 기절/사망/관전 -->
+  <!-- 죽었을 때: 부활까지 남은 시간 -->
   <div id="downOverlay" class="hidden">
     <div id="downTitle"></div>
     <div id="downCount"></div>
     <div id="downHint"></div>
   </div>
 
-  <!-- 라운드 종료 / 경기 종료 -->
-  <div id="roundBanner" class="hidden"></div>
+  <!-- 경기 종료 -->
   <div id="matchEnd" class="panel hidden">
     <h1 id="matchTitle"></h1>
     <div id="matchScore"></div>

@@ -153,48 +153,8 @@ export const BOXES_BY_MAP: Record<MapId, readonly Box[]> = { CLASSIC: buildBoxes
 /** 모든 맵의 상자 (조준/화살/카메라 광선: 다른 맵은 멀리 떨어져 있어 영향 없음) */
 export const BOXES: readonly Box[] = [...BOXES_BY_MAP.CLASSIC, ...BOXES_BY_MAP.NEON];
 
-/** 결계를 받는 역할 */
-export type BarrierRole = "atk" | "def";
-/** 준비 시간 결계 (NEON). role: all = 모두 막음, atk/def = 그 역할만 막음 */
-export interface Barrier { x0: number; y0: number; x1: number; y1: number; role: "all" | BarrierRole }
-export const BARRIERS: readonly Barrier[] = mergeCells(NEON_GRID, (ch) => "!xy".includes(ch)).map((r) => ({
-  ...cellRectToWorld(r),
-  role: r.ch === "!" ? "all" : r.ch === "x" ? "atk" : "def",
-}));
-/** 결계 높이 (화면 표시용. 물리에서는 높이 없이 무조건 막음) */
-export const BARRIER_HEIGHT = 5;
-
 /** NEON 목표 건물 (사이트별) */
 export const SITES = Object.fromEntries(
   BOXES_BY_MAP.NEON.filter((b) => b.site).map((b) => [b.site, b]),
 ) as Record<SiteId, Box>;
 
-/** 집 작업(부수기/수리) 가능 거리: 집 벽면에서 수평 거리 (m) */
-export const HOUSE_WORK_DISTANCE = 1.2;
-/** 집 작업은 땅 높이 근처에서만 가능 (발 높이가 이 값 이하) */
-export const HOUSE_WORK_MAX_FOOT_Z = 0.5;
-
-/** (x, y)에서 해당 팀 집 벽면까지의 수평 거리 (집 안이면 0) */
-export function distanceToHouse(team: TeamId, x: number, y: number): number {
-  const h = HOUSES[team];
-  const half = h.size / 2;
-  const dx = Math.max(Math.abs(x - h.x) - half, 0);
-  const dy = Math.max(Math.abs(y - h.y) - half, 0);
-  return Math.hypot(dx, dy);
-}
-
-/** (x, y)에서 사이트 목표 건물 벽면까지의 수평 거리 */
-export function distanceToSite(site: SiteId, x: number, y: number): number {
-  const b = SITES[site];
-  return Math.hypot(Math.max(b.x0 - x, 0, x - b.x1), Math.max(b.y0 - y, 0, y - b.y1));
-}
-
-/** 이 위치에서 사이트 건물 작업(부수기)이 가능한 거리인지 (집 작업과 같은 거리 규칙) */
-export function isNearSite(site: SiteId, x: number, y: number, z: number): boolean {
-  return z <= HOUSE_WORK_MAX_FOOT_Z && distanceToSite(site, x, y) <= HOUSE_WORK_DISTANCE + PHYS.PLAYER_HALF;
-}
-
-/** 이 위치에서 해당 팀 집 작업이 가능한 거리인지 (캐릭터 몸 두께 포함) */
-export function isNearHouse(team: TeamId, x: number, y: number, z: number): boolean {
-  return z <= HOUSE_WORK_MAX_FOOT_Z && distanceToHouse(team, x, y) <= HOUSE_WORK_DISTANCE + PHYS.PLAYER_HALF;
-}

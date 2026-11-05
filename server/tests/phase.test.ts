@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ATTACK_MS, CLASS_SELECT_MS, COUNTDOWN_MS, REPAIR_MS, ROUND_END_MS } from "../src/constants";
+import { CLASS_SELECT_MS, COUNTDOWN_MS, MATCH_MS } from "../src/constants";
 import { canMoveIn, canStartMatch, enterPhase, forcePhase, initialPhase, nextOnTimeout, startMatch } from "../src/phase";
 
 const P = (team: "A" | "B", ready = true, conn: "CONNECTED" | "RECONNECTING" = "CONNECTED") => ({ team, ready, conn });
@@ -18,40 +18,24 @@ describe("게임 시작 조건", () => {
 });
 
 describe("단계 전환", () => {
-  it("시작하면 1라운드 직업 선택 5초, 끝나면 COUNTDOWN 10초", () => {
-    const s = startMatch(1000);
-    expect(s).toMatchObject({ phase: "CLASS_SELECT", round: 1, attackingTeam: "A", phaseEndsAt: 1000 + CLASS_SELECT_MS });
-    expect(CLASS_SELECT_MS).toBe(5000);
-    expect(nextOnTimeout(s, 6000)).toMatchObject({ phase: "COUNTDOWN", round: 1, phaseEndsAt: 6000 + COUNTDOWN_MS });
+  it("로비 → 직업 선택 5초 → 준비 5초 → 경기 10분 → 끝", () => {
+    let s = startMatch(initialPhase(), 1000);
+    expect(s).toMatchObject({ phase: "CLASS_SELECT", phaseEndsAt: 1000 + CLASS_SELECT_MS });
+    s = nextOnTimeout(s, 2000);
+    expect(s).toMatchObject({ phase: "COUNTDOWN", phaseEndsAt: 2000 + COUNTDOWN_MS });
+    s = nextOnTimeout(s, 3000);
+    expect(s).toMatchObject({ phase: "PLAY", phaseEndsAt: 3000 + MATCH_MS });
+    s = nextOnTimeout(s, 4000);
+    expect(s).toMatchObject({ phase: "MATCH_END", phaseEndsAt: null });
+    expect(nextOnTimeout(s, 5000)).toBe(s);
   });
-  it("COUNTDOWN → ATTACK → ROUND_END → 다음 라운드 COUNTDOWN", () => {
-    let s = enterPhase(startMatch(0), "COUNTDOWN", 0);
-    s = nextOnTimeout(s, s.phaseEndsAt!);
-    expect(s.phase).toBe("ATTACK");
-    expect(s.phaseEndsAt).toBe(COUNTDOWN_MS + ATTACK_MS);
-    s = nextOnTimeout(s, s.phaseEndsAt!);
-    expect(s.phase).toBe("ROUND_END");
-    expect(s.phaseEndsAt).toBe(COUNTDOWN_MS + ATTACK_MS + ROUND_END_MS);
-    s = nextOnTimeout(s, s.phaseEndsAt!);
-    expect(s).toMatchObject({ phase: "COUNTDOWN", round: 2 });
+  it("경기 중에만 움직일 수 있다", () => {
+    expect(canMoveIn("PLAY")).toBe(true);
+    for (const p of ["LOBBY", "CLASS_SELECT", "COUNTDOWN", "MATCH_END"] as const) expect(canMoveIn(p)).toBe(false);
   });
-  it("REPAIR 시간 초과 → ROUND_END", () => {
-    const s = enterPhase(startMatch(0), "REPAIR", 0);
-    expect(s.phaseEndsAt).toBe(REPAIR_MS);
-    expect(nextOnTimeout(s, REPAIR_MS).phase).toBe("ROUND_END");
-  });
-  it("LOBBY/MATCH_END는 시간 제한 없음", () => {
-    expect(initialPhase().phaseEndsAt).toBeNull();
-    expect(enterPhase(startMatch(0), "MATCH_END", 0).phaseEndsAt).toBeNull();
-    expect(nextOnTimeout(initialPhase(), 99).phase).toBe("LOBBY");
-  });
-  it("강제 전환: LOBBY는 초기화, 그 외는 라운드 1 이상", () => {
-    expect(forcePhase(initialPhase(), "ATTACK", 0)).toMatchObject({ phase: "ATTACK", round: 1 });
-    expect(forcePhase(startMatch(0), "LOBBY", 0)).toEqual(initialPhase());
-  });
-  it("ATTACK/REPAIR에서만 이동 가능", () => {
-    expect(canMoveIn("ATTACK")).toBe(true);
-    expect(canMoveIn("REPAIR")).toBe(true);
-    for (const p of ["LOBBY", "COUNTDOWN", "ROUND_END", "MATCH_END"] as const) expect(canMoveIn(p)).toBe(false);
+  it("디버그 강제 전환: 로비로 가도 맵은 그대로", () => {
+    const s = enterPhase({ ...initialPhase(), map: "NEON" }, "PLAY", 0);
+    expect(forcePhase(s, "LOBBY", 10)).toMatchObject({ phase: "LOBBY", map: "NEON" });
+    expect(forcePhase(s, "COUNTDOWN", 10)).toMatchObject({ phase: "COUNTDOWN", phaseEndsAt: 10 + COUNTDOWN_MS });
   });
 });

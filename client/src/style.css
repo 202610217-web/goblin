@@ -31,7 +31,7 @@ html, body {
 /* 겹치는 순서: 3D 화면 < 이름표 < 터치 레이어 < HUD/버튼/패널 < 덮개 */
 .label { z-index: 2; }
 #touch { z-index: 5; }
-#hud, #netStatus, #teamPanelMine, #teamPanelEnemy, #crosshair, #downOverlay, #roundBanner { z-index: 6; }
+#hud, #netStatus, #teamPanelMine, #crosshair, #downOverlay { z-index: 6; }
 #buttons, .small, #debug { z-index: 8; }
 .panel { z-index: 20; }
 #toast { z-index: 30; }
@@ -84,17 +84,6 @@ button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 #hudRound { font-size: 20px; color: #ddd; white-space: nowrap; }
 #hudTimer { font-size: 32px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
 #hudTimer.urgent { color: var(--bad); }
-#hudRole { font-size: 20px; background: rgba(0, 0, 0, 0.45); border-radius: 8px; padding: 2px 10px; white-space: nowrap; }
-.badge { font-size: 14px; font-weight: 800; background: var(--accent); color: #111; border-radius: 6px; padding: 2px 6px; }
-#history { display: flex; gap: 4px; min-height: 12px; }
-#history i { width: 12px; height: 12px; border-radius: 50%; display: block; border: 1px solid rgba(255, 255, 255, 0.5); }
-#history i.A { background: var(--teamA); } #history i.B { background: var(--teamB); }
-#workBar { background: rgba(0, 0, 0, 0.6); border-radius: 10px; padding: 4px 12px 8px; min-width: 260px; }
-#workLabel { font-size: 20px; font-weight: 700; }
-#workBar .bar { position: relative; height: 14px; background: #333; border-radius: 7px; overflow: hidden; }
-#workFill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); }
-#workBar.repair #workFill { background: var(--ok); }
-#workCheckpoint { position: absolute; top: -2px; bottom: -2px; width: 3px; background: #fff; }
 
 /* 점수판/전체 화면 버튼 (HUD와 겹치지 않게 오른쪽 위) */
 button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64px; padding: 6px 12px; margin: 0; opacity: 0.9; }
@@ -114,7 +103,6 @@ button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64
   pointer-events: none; font-size: 20px; width: 190px;
 }
 .teamPanel.left { left: calc(var(--safe-l) + 10px); }
-.teamPanel.right { right: calc(var(--safe-r) + 116px); }
 .tp { background: rgba(0, 0, 0, 0.5); border-radius: 8px; padding: 3px 8px; }
 .tp .nm { display: flex; justify-content: space-between; white-space: nowrap; overflow: hidden; }
 .tp .st { font-size: 14px; color: var(--muted); }
@@ -156,15 +144,9 @@ button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64
 /* 보이는 크기보다 넉넉한 터치 영역 */
 .gameBtn::before { content: ""; position: absolute; inset: -14px; border-radius: 50%; }
 .gameBtn.pressed { transform: scale(0.93); }
-#actionBtn { right: 0; bottom: 0; width: 120px; height: 120px; background: rgba(224, 164, 58, 0.85); }
-#actionBtn.revive { background: rgba(76, 196, 106, 0.9); }
-#actionBtn.disabled { background: rgba(120, 120, 120, 0.55); color: #333; }
 #attackBtn { right: 140px; bottom: 6px; width: 96px; height: 96px; background: rgba(255, 107, 107, 0.85); overflow: hidden; }
 #attackBtn.cooling { background: rgba(120, 60, 60, 0.7); color: #ddd; }
 #attackCd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, 0.45); }
-.ring { position: absolute; inset: -8px; width: calc(100% + 16px); height: calc(100% + 16px); transform: rotate(-90deg); pointer-events: none; }
-.ring circle { fill: none; stroke-width: 6; stroke: transparent; }
-.ring #actionRing { stroke: #fff; stroke-linecap: round; stroke-dasharray: 289; stroke-dashoffset: 289; }
 #touch.spectate #buttons, #touch.spectate #stickBase { display: none; }
 
 /* 기절/사망/관전 */
@@ -175,12 +157,6 @@ button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64
 #downTitle { font-size: 30px; font-weight: 800; color: var(--bad); }
 #downCount { font-size: 72px; font-weight: 900; font-variant-numeric: tabular-nums; }
 #downHint { font-size: 20px; }
-#roundBanner {
-  position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); padding: 16px 36px; border-radius: 14px;
-  background: rgba(0, 0, 0, 0.75); font-size: 34px; font-weight: 800; text-align: center; pointer-events: none;
-}
-#roundBanner small { display: block; font-size: 20px; font-weight: 600; color: #ddd; }
-#roundBanner.A { border: 3px solid var(--teamA); } #roundBanner.B { border: 3px solid var(--teamB); }
 #matchScore { font-size: 44px; font-weight: 900; }
 
 /* 점수판 표 */
@@ -211,12 +187,11 @@ button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64
 @media (max-height: 520px) {
   #hud { transform: translateX(-50%) scale(0.62); transform-origin: top center; }
   .teamPanel.left { transform: scale(0.7); transform-origin: top left; }
-  .teamPanel.right { transform: scale(0.7); transform-origin: top right; right: calc(var(--safe-r) + 84px); }
   button.small { transform: scale(0.75); transform-origin: top right; }
   #fullscreenBtn { top: calc(var(--safe-t) + 44px); }
   #buttons { transform: scale(0.72); transform-origin: right bottom; right: calc(var(--safe-r) + 12px); bottom: calc(var(--safe-b) + 10px); }
   #stickBase { transform: scale(0.8); }
-  #downOverlay, #roundBanner { transform: translate(-50%, -50%) scale(0.7); }
+  #downOverlay { transform: translate(-50%, -50%) scale(0.7); }
   .label { font-size: 14px; }
   .label .tag { font-size: 14px; }
   .label .hpbar { width: 50px; }
@@ -237,15 +212,6 @@ button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64
 
 
 /* NEON: A/B 사이트 체력 */
-#siteBars { display: flex; gap: 10px; background: rgba(0, 0, 0, 0.6); border-radius: 10px; padding: 6px 12px; }
-#siteBars.hidden { display: none; }
-#siteBars .site { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 700; }
-#siteBars .bar { position: relative; width: 110px; height: 12px; background: #333; border-radius: 6px; overflow: hidden; }
-#siteBars .bar div { position: absolute; left: 0; top: 0; bottom: 0; }
-#siteBars .A b { color: #ffb02e; } #siteBars .A .bar div { background: #ffb02e; }
-#siteBars .B b { color: #2ee6ff; } #siteBars .B .bar div { background: #2ee6ff; }
-#siteBars .site.hit span { color: #ff6b6b; }
-#siteBars .site.dead { opacity: 0.6; }
 
 /* 미니맵: 실제 충돌 데이터를 그린 것 (왼쪽, 우리 팀 체력 아래) */
 #minimap {
@@ -255,19 +221,8 @@ button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64
 @media (max-height: 500px) { #minimap { width: 150px; top: calc(var(--safe-t) + 100px); } }
 
 /* ---------- 역할 배지 ---------- */
-#hudRole.atk { border-left: 4px solid #ff6b6b; }
-#hudRole.def { border-left: 4px solid #5f95ff; }
 
 /* ---------- 목표 표시 ---------- */
-#objectives { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
-.objMarker { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; color: var(--c); text-shadow: 0 0 3px #000, 0 0 6px #000; }
-.objMarker b { font-size: 26px; line-height: 1; border: 2px solid var(--c); border-radius: 8px; padding: 2px 8px; background: rgba(0,0,0,0.45); }
-.objMarker span { font-size: 14px; color: #fff; margin-top: 2px; }
-.objMarker i { position: absolute; width: 0; height: 0; border: 9px solid transparent; border-left-color: var(--c); left: 50%; top: 50%; margin: -9px 0 0 -9px; display: none; transform-origin: 50% 50%; }
-.objMarker.off i { display: block; translate: 0 0; }
-.objMarker.off b { font-size: 20px; }
-.objMarker.active b { animation: objPulse 0.8s ease-in-out infinite alternate; }
-@keyframes objPulse { to { background: var(--c); color: #111; } }
 
 /* ---------- 맞힘 X 표시 ---------- */
 #crosshair.hit::before, #crosshair.hit::after { background: #ff4040; animation: hitX 0.25s ease-out; }
@@ -354,22 +309,6 @@ button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 .scoreRow .center { padding: 6px 20px 4px; min-width: 146px; }
 #hudRound { font-size: 12px; font-weight: 500; letter-spacing: 0.04em; color: var(--muted); }
 #hudTimer { font: 600 32px/1.1 var(--mono); letter-spacing: -0.02em; }
-.badge { font-size: 11px; font-weight: 600; background: var(--fg); color: var(--ink); border-radius: 3px; padding: 2px 5px; }
-#history i { width: 8px; height: 8px; border-radius: 1px; border: none; }
-#hudRole { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line-strong); border-radius: 6px; padding: 6px 14px 6px 12px; font-size: 15px; }
-#hudRole.atk { border-left-color: var(--teamA); } #hudRole.def { border-left-color: var(--teamB); }
-#hudRole b { font-weight: 600; } #hudRole span { color: var(--muted); font-weight: 600; }
-#siteBars { gap: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
-#siteBars .site { gap: 8px; font-size: 15px; }
-#siteBars .bar { width: 112px; height: 6px; border-radius: 1px; background: rgba(74, 81, 92, 0.55); }
-#siteBars .A b { color: var(--siteA); } #siteBars .A .bar div { background: var(--siteA); }
-#siteBars .B b { color: var(--siteB); } #siteBars .B .bar div { background: var(--siteB); }
-#siteBars span { font: 500 14px var(--mono); min-width: 32px; text-align: right; }
-#siteBars .site.hit span { color: var(--bad); }
-#workBar { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px 8px; }
-#workLabel { font-size: 14px; font-weight: 600; }
-#workBar .bar { height: 6px; border-radius: 1px; }
-#workFill { background: var(--siteA); }
 
 /* 오른쪽 위 아이콘 버튼 2개 (40×40) */
 button.iconBtn { position: fixed; width: 40px; height: 40px; min-height: 40px; min-width: 40px; padding: 0; margin: 0; display: flex; align-items: center; justify-content: center;
@@ -381,24 +320,20 @@ button.iconBtn { position: fixed; width: 40px; height: 40px; min-height: 40px; m
 .teamPanel { width: 208px; gap: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; box-sizing: border-box; font-size: 15px; }
 .teamPanel:empty { display: none; }
 .teamPanel.left { top: calc(var(--safe-t) + 16px); left: calc(var(--safe-l) + 16px); }
-.teamPanel.right { top: calc(var(--safe-t) + 64px); right: calc(var(--safe-r) + 16px); }
 .tp { background: none; border-radius: 0; padding: 0; }
 .tp + .tp { margin-top: 10px; }
 .tp .nm { font-weight: 600; margin-bottom: 4px; }
 .tp .st { font: 500 14px var(--mono); color: var(--muted); }
 .hpbar { height: 6px; border-radius: 1px; background: rgba(74, 81, 92, 0.55); }
-.teamPanel.left .hpbar div { background: var(--teamA); } .teamPanel.right .hpbar div { background: var(--teamB); }
+.teamPanel .hpbar div { background: var(--ok); }
 .hpbar.low div { background: var(--bad) !important; }
 #minimap { left: calc(var(--safe-l) + 16px); width: 208px; border: 1px solid var(--line-strong); border-radius: 4px; }
-#feed { top: calc(var(--safe-t) + 172px); right: calc(var(--safe-r) + 16px); }
+#feed { top: calc(var(--safe-t) + 64px); right: calc(var(--safe-r) + 16px); }
 .feedItem { background: rgba(11, 13, 16, 0.7); border-radius: 4px; font-size: 12px; font-weight: 500; padding: 4px 10px; border-right: none !important; border-left: 3px solid var(--line-strong); }
 .feedItem.down { border-left-color: var(--siteA); } .feedItem.dead { border-left-color: var(--bad); } .feedItem.up { border-left-color: var(--ok); }
 #netStatus { left: calc(var(--safe-l) + 16px); bottom: calc(var(--safe-b) + 16px); font: 500 13px var(--mono); color: var(--dim); }
 
 /* 목표 표시 · 이름표 · 조준점 */
-.objMarker b { font-size: 15px; font-weight: 600; border: 1.5px solid var(--c); border-radius: 4px; padding: 2px 8px; background: rgba(11, 13, 16, 0.55); text-shadow: none; }
-.objMarker span { font: 500 13px var(--mono); }
-.objMarker.off b { font-size: 13px; }
 .label { font-size: 15px; font-weight: 600; text-shadow: 0 1px 2px #000, 0 0 3px #000; }
 .label .hpbar { width: 64px; }
 .dmgNum { font: 600 20px var(--mono); color: var(--fg); }
@@ -419,27 +354,19 @@ button.iconBtn { position: fixed; width: 40px; height: 40px; min-height: 40px; m
 #attackBtn.cooling .ic { opacity: 0.35; }
 #attackBtn.cooling span { font: 600 18px var(--mono); color: var(--fg); }
 #attackCd { background: rgba(232, 234, 237, 0.12); }
-#actionBtn { right: 8px; bottom: 112px; width: 80px; height: 80px; background: rgba(11, 13, 16, 0.55); color: var(--fg); }
-#actionBtn.revive { background: rgba(70, 167, 88, 0.35); border-color: var(--ok); }
-#actionBtn.disabled { background: rgba(11, 13, 16, 0.35); color: var(--dim); border-color: var(--line); }
-#actionBtn:not(.disabled):not(.revive) { border-color: var(--siteA); }
-.ring #actionRing { stroke: var(--fg); stroke-width: 4; }
 #crouchBtn.on { background: rgba(232, 234, 237, 0.24); border-color: var(--fg); }
 #touch.spectate #buttons .gameBtn { display: none; }
 
 @media (max-height: 520px) {
   #hud { transform: translateX(-50%) scale(0.8); }
   #buttons { transform: scale(0.82); }
-  .teamPanel.left, .teamPanel.right, #minimap { transform: scale(0.8); }
+  .teamPanel.left, #minimap { transform: scale(0.8); }
   button.iconBtn { transform: none; }
 }
 #jumpBtn, #crouchBtn { background: rgba(11, 13, 16, 0.55); }
 #jumpBtn.pressed, #crouchBtn.on { background: rgba(232, 234, 237, 0.24); }
 #crouchBtn.on { border-color: var(--fg); }
 /* 라운드 결과: 패널 + 이긴 팀 색 윗줄 */
-#roundBanner { background: rgba(14, 16, 20, 0.92); border: 1px solid var(--line) !important; border-top: 3px solid var(--line-strong) !important; border-radius: 6px; padding: 16px 32px; font-size: 28px; font-weight: 700; text-shadow: none; }
-#roundBanner.A { border-top-color: var(--teamA) !important; } #roundBanner.B { border-top-color: var(--teamB) !important; }
-#roundBanner small { font-size: 15px; font-weight: 500; color: var(--muted); margin-top: 6px; }
 /* 맞은 방향: 화면 가장자리 쪽 얇은 빨간 호 */
 .dmgDir { width: 84vmin; height: 84vmin; margin: -42vmin 0 0 -42vmin; background: none; border: 0 solid transparent; border-top: 5px solid rgba(229, 72, 77, 0.9); }
 .error:empty { display: none; } /* 오류가 없으면 빈 칸도 없게 */
@@ -515,7 +442,6 @@ button.iconBtn { position: fixed; width: 40px; height: 40px; min-height: 40px; m
 /* 엄지 버튼: 타격(모서리)을 중심으로 부채꼴 — 점프는 위 왼쪽, 앉기는 왼쪽, 행동은 위 */
 #buttons { width: 240px; height: 236px; }
 #attackBtn { right: 0; bottom: 0; width: 104px; height: 104px; }
-#actionBtn { right: 12px; bottom: 128px; width: 80px; height: 80px; }
 #jumpBtn { right: 112px; bottom: 100px; width: 68px; height: 68px; }
 #crouchBtn { right: 128px; bottom: 8px; width: 64px; height: 64px; }
 

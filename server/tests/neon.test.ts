@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { COLS, NEON_GRID, NEON_SPAWNS, ROWS, cellAt, cellCenter, isFloorCell } from "../../shared/neon";
 import { type Body, groundHeightAt, makeBody, radToAngle, simulate, withAngle, withJump } from "../../shared/sim";
 import { arrowSegmentHit, makeArrow } from "../../shared/arrow";
-import { BARRIERS, MAPS, PHYS, SITES, type SiteId, isNearSite, mapAt } from "../../shared/world";
+import { MAPS, PHYS, SITES, type SiteId, mapAt } from "../../shared/world";
 
 /** 격자 길 찾기: 바닥 칸끼리 4방향. blocked(ch)면 못 지나감. 닿은 칸 집합("c,s") */
 function reach(from: { c: number; s: number }, blocked: (ch: string) => boolean = () => false): Set<string> {
@@ -23,12 +23,12 @@ function reach(from: { c: number; s: number }, blocked: (ch: string) => boolean 
   return seen;
 }
 const cellOf = (p: { x: number; y: number }) => cellAt(p.x, p.y)!;
-/** 사이트 건물 바로 옆 바닥 칸들 */
+/** A/B 건물 바로 옆(1.6m 안) 바닥 칸들 */
 function siteFront(site: SiteId): string[] {
-  const out: string[] = [];
+  const b = SITES[site], out: string[] = [];
   for (let s = 0; s < ROWS; s++) for (let c = 0; c < COLS; c++) {
     const p = cellCenter(c, s);
-    if (isFloorCell(NEON_GRID[s]![c]!) && isNearSite(site, p.x, p.y, 0)) out.push(`${c},${s}`);
+    if (isFloorCell(NEON_GRID[s]![c]!) && Math.hypot(Math.max(b.x0 - p.x, 0, p.x - b.x1), Math.max(b.y0 - p.y, 0, p.y - b.y1)) <= 1.6) out.push(`${c},${s}`);
   }
   return out;
 }
@@ -45,28 +45,28 @@ describe("NEON DISTRICT 맵", () => {
     expect(mapAt(c.x1 - 1)).toBe("CLASSIC");
   });
 
-  it("모든 바닥 칸이 하나로 이어져 있다 (끊긴 구역 없음, 결계 없을 때)", () => {
-    const all = reach(cellOf(NEON_SPAWNS.atk[0]!));
+  it("모든 바닥 칸이 하나로 이어져 있다 (끊긴 구역 없음)", () => {
+    const all = reach(cellOf(NEON_SPAWNS.A[0]!));
     let floor = 0;
     for (let s = 0; s < ROWS; s++) for (let c = 0; c < COLS; c++) if (isFloorCell(NEON_GRID[s]![c]!)) floor++;
     expect(all.size).toBe(floor);
   });
 
   it("두 사이트 건물 앞까지 걸어서 갈 수 있고, A와 B는 충분히 떨어져 있다", () => {
-    const all = reach(cellOf(NEON_SPAWNS.atk[0]!));
+    const all = reach(cellOf(NEON_SPAWNS.A[0]!));
     for (const site of ["A", "B"] as const) expect(siteFront(site).some((k) => all.has(k))).toBe(true);
     const a = SITES.A, b = SITES.B;
     expect(Math.hypot((a.x0 + a.x1) / 2 - (b.x0 + b.x1) / 2, (a.y0 + a.y1) / 2 - (b.y0 + b.y1) / 2)).toBeGreaterThan(35);
   });
 
-  it("공격팀 스폰에서 각 사이트로 가는 길이 여러 개 (서쪽 경계의 통로 3개 중 하나를 막아도 갈 수 있다)", () => {
+  it("A팀 스폰에서 각 건물로 가는 길이 여러 개 (서쪽 경계의 통로 3개 중 하나를 막아도 갈 수 있다)", () => {
     const gates = [[14, 23], [14, 15], [14, 6]] as const; // 북쪽 골목, 중앙길, 남쪽길
     for (const [gc, gs] of gates) {
       // 그 통로 칸만 막고 길 찾기
       const blocked = new Set<string>();
       for (let s = gs - 1; s <= gs + 1; s++) blocked.add(`${gc},${s}`);
-      const seen = new Set([`${cellOf(NEON_SPAWNS.atk[0]!).c},${cellOf(NEON_SPAWNS.atk[0]!).s}`]);
-      const q = [cellOf(NEON_SPAWNS.atk[0]!)];
+      const seen = new Set([`${cellOf(NEON_SPAWNS.A[0]!).c},${cellOf(NEON_SPAWNS.A[0]!).s}`]);
+      const q = [cellOf(NEON_SPAWNS.A[0]!)];
       while (q.length) {
         const { c, s } = q.shift()!;
         for (const [dc, ds] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -79,12 +79,12 @@ describe("NEON DISTRICT 맵", () => {
     }
   });
 
-  it("스폰 위치는 바닥이고 공격·수비 스폰은 멀리 떨어져 있다", () => {
-    for (const p of [...NEON_SPAWNS.atk, ...NEON_SPAWNS.def]) {
+  it("스폰 위치는 바닥이고 A·B팀 스폰은 멀리 떨어져 있다", () => {
+    for (const p of [...NEON_SPAWNS.A, ...NEON_SPAWNS.B]) {
       expect(groundHeightAt(p.x, p.y, 0)).toBe(0);
       expect(isFloorCell(NEON_GRID[cellOf(p).s]![cellOf(p).c]!)).toBe(true);
     }
-    expect(NEON_SPAWNS.def[0]!.x - NEON_SPAWNS.atk[0]!.x).toBeGreaterThan(70);
+    expect(NEON_SPAWNS.B[0]!.x - NEON_SPAWNS.A[0]!.x).toBeGreaterThan(70);
   });
 
   it("맵 밖으로 나갈 수 없다 (북쪽 끝까지 걸어도 경계 안)", () => {
@@ -150,49 +150,5 @@ describe("NEON DISTRICT 맵", () => {
     const down = walk(top, E, 2_500);
     expect(down.z).toBe(0);
     expect(down.x).toBeGreaterThan(cellCenter(33, 26).x);
-  });
-});
-
-describe("준비 시간 결계", () => {
-  const isBarrier = (role: "atk" | "def") => (ch: string) => ch === "!" || (role === "atk" ? ch === "x" : ch === "y");
-
-  it("공격팀은 스폰 마당을 못 벗어난다", () => {
-    const r = reach(cellOf(NEON_SPAWNS.atk[0]!), isBarrier("atk"));
-    for (const k of r) {
-      const [c, s] = k.split(",").map(Number);
-      expect(NEON_GRID[s!]![c!]).toBe("a");
-    }
-  });
-
-  it("공격팀은 스폰 밖(중앙 광장)에 있어도 사이트에 못 들어간다", () => {
-    const r = reach({ c: 24, s: 17 }, isBarrier("atk"));
-    for (const site of ["A", "B"] as const) expect(siteFront(site).some((k) => r.has(k))).toBe(false);
-  });
-
-  it("수비팀은 두 사이트 모두 갈 수 있고, 공격팀 구역(서쪽)과 스폰에는 못 간다", () => {
-    const r = reach(cellOf(NEON_SPAWNS.def[0]!), isBarrier("def"));
-    for (const site of ["A", "B"] as const) expect(siteFront(site).some((k) => r.has(k))).toBe(true);
-    for (const k of r) expect(Number(k.split(",")[0])).toBeGreaterThan(14);
-  });
-
-  it("물리: 결계 해제 시각 전에는 막히고, 그 뒤에는 지나간다", () => {
-    const sp = NEON_SPAWNS.atk[0]!; // 동쪽 출구(c 5, s 13~14) 앞
-    const until = 2_000;
-    const body: Body = { ...makeBody(sp.x, cellCenter(2, 13).y + 1, 0), bu: until, br: "atk" };
-    const blocked = walk(body, E, 1_500);
-    const gate = BARRIERS.find((w) => w.role === "all" && w.x0 === 60 + 5 * 2)!;
-    expect(blocked.x).toBeCloseTo(gate.x0 - PHYS.PLAYER_HALF, 3);
-    const later = simulate(blocked, 4_000);
-    expect(later.x).toBeGreaterThan(gate.x1);
-    // 결계가 없는 몸(기본 맵 규칙)은 처음부터 지나간다
-    expect(walk(makeBody(sp.x, cellCenter(2, 13).y + 1, 0), E, 1_500).x).toBeGreaterThan(gate.x1);
-  });
-
-  it("수비 역할 결계는 공격팀을 막지 않는다", () => {
-    const p = cellCenter(16, 15);
-    const atk = walk({ ...makeBody(p.x, p.y, 0), bu: 9_999, br: "atk" }, W, 2_000);
-    const def = walk({ ...makeBody(p.x, p.y, 0), bu: 9_999, br: "def" }, W, 2_000);
-    expect(atk.x).toBeLessThan(60 + 14 * 2);
-    expect(def.x).toBeCloseTo(60 + 15 * 2 + PHYS.PLAYER_HALF, 3); // 결계(c 14) 동쪽 면에서 멈춤
   });
 });

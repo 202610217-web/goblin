@@ -18,72 +18,39 @@ import {
   RECONNECT_GRACE_MS,
   SESSION_TOKEN_BYTES,
   SPAWNS,
-  FIRST_ATTACKING_TEAM,
 } from "./constants";
 import { type Body, angleToRad, groundHeightAt, makeBody, roundBody, simulate, withAngle, withCrouch, withJump } from "../../shared/sim";
-import { type BarrierRole, MAPS, PHYS, type SiteId, isNearHouse, isNearSite } from "../../shared/world";
+import { MAPS, PHYS } from "../../shared/world";
 import { NEON_SPAWNS } from "../../shared/neon";
-import { AIM, findAimTarget, inReach } from "../../shared/aim";
+import { findAimTarget } from "../../shared/aim";
 import { ARROW, CLASSES, CLASS_IDS, type ClassId, STEALTH } from "../../shared/classes";
 import { arrowSegmentHit, makeArrow } from "../../shared/arrow";
 import { type BotPlan, decide, msToWaypoint, planFor } from "./bots";
 import { inputTime } from "./lag";
-import {
-  type RoundEndReason,
-  type RoundRecord,
-  type Score,
-  type Turn,
-  addPoint,
-  isDeuce,
-  matchPointTeams,
-  matchWinner,
-  nextTurn,
-  roundWinner,
-} from "./score";
+import { type Score, addKill, killWinner, timeUpWinner } from "./score";
 import {
   type Combat,
-  applyDeath,
+  applyHit,
+  checkAttack,
   endStealth,
   isBehind,
-  startStealth,
-  checkAttack,
-  checkReviveStart,
-  completeRevive,
   isCombatPhase,
   isHittable,
   newCombat,
-  resetForRound,
-  resolveHit,
-  startRevive,
-  stopRevive,
-  wipeWinner,
+  respawn,
+  startStealth,
 } from "./combat";
-import {
-  type HoldRejectReason,
-  type WorkState,
-  checkHoldStart,
-  completionAt,
-  isComplete,
-  progressAt,
-  startHold,
-  stopHold,
-  targetHouseTeam,
-  workForPhase,
-  workRate,
-  DEFAULT_WORK_RULES,
-} from "./work";
 import { type Deadline, nextDeadlineAt, removeDeadline, splitDue, upsertDeadline } from "./deadlines";
 import { assignTeam, canSwitchTeam, ownerId, sanitizeNickname } from "./lobby";
 import {
   type PhaseState,
   canMoveIn,
   canStartMatch,
+  enterPhase,
   forcePhase,
   initialPhase,
   nextOnTimeout,
-  nextOnWorkComplete,
   startMatch,
-  enterPhase,
 } from "./phase";
 import {
   type ClientMessage,
@@ -94,7 +61,6 @@ import {
   type PublicPlayer,
   type ServerMessage,
   type Team,
-  type WorkInfo,
   type UsageStats,
   parseClientMessage,
 } from "./protocol";
@@ -114,7 +80,7 @@ interface PlayerRecord {
   wantA: number;
   /** 마지막으로 처리한 입력 순번 (클라이언트 예측 보정용) */
   seq: number;
-  /** 체력, 기절/사망, 치유 상태 */
+  /** 체력, 사망/부활, 킬/데스 */
   c: Combat;
   /** 연습용 더미면 true (소켓 없음, 서버가 움직임) */
   bot?: boolean;
@@ -129,17 +95,10 @@ interface PlayerRecord {
 /** storage에 저장되는 방 상태 */
 interface RoomState extends PhaseState {
   code: string;
-  /** 집 작업(부수기/수리) 상태 */
-  work: WorkState;
-  /** ROUND_END 동안: 방금 라운드의 승자와 이유 */
-  roundEnd: { winner: Team; reason: RoundEndReason; site?: SiteId } | null;
-  /** NEON: A/B 사이트 건물 작업 상태 (예전에 저장된 방에는 없음) */
-  sites?: Record<SiteId, WorkState> | null;
+  /** 팀별 킬 수 */
   score: Score;
-  history: RoundRecord[];
-  turn: Turn;
   matchWinner: Team | null;
-  matchEndReason: "score" | "player_left" | null;
+  matchEndReason: "score" | "time" | "player_left" | null;
   /** 연습 경기인지 */
   practice: boolean;
   players: PlayerRecord[];
@@ -161,56 +120,24 @@ interface RateWindow {
 
 const STATE_KEY = "room";
 
-/** hold_start 거부 사유 → 안내 문구 */
+/** 타격 거부 사유 → 안내 문구 */
 const ATTACK_REJECT_TEXT: Record<string, string> = {
   wrong_phase: "지금은 타격할 수 없어요",
-  not_normal: "기절/사망 상태에서는 타격할 수 없어요",
-  busy: "작업이나 치유 중에는 타격할 수 없어요",
+  not_normal: "죽은 상태에서는 타격할 수 없어요",
   cooldown: "아직 타격할 수 없어요 (쿨다운)",
-};
-const REVIVE_REJECT_TEXT: Record<string, string> = {
-  wrong_phase: "지금은 치유할 수 없어요",
-  not_normal: "기절/사망 상태에서는 치유할 수 없어요",
-  busy: "작업 중에는 치유할 수 없어요",
-  no_target: "근처에 기절한 팀원이 없어요",
-};
-
-const HOLD_REJECT_TEXT: Record<HoldRejectReason, string> = {
-  wrong_phase: "지금은 집 작업을 할 수 없어요",
-  wrong_team: "우리 팀이 할 수 있는 작업이 아니에요",
-  not_connected: "연결 상태를 확인해 주세요",
-  too_far: "집에 더 가까이 가야 해요",
-  not_normal: "기절/사망 상태에서는 작업할 수 없어요",
-  busy: "치유 중에는 작업할 수 없어요",
-  already_holding: "이미 작업 중이에요",
 };
 
 /** 이 플레이어의 직업 수치 */
 const cls = (p: { cls?: ClassId }) => CLASSES[p.cls ?? "KNIGHT"];
 const maxHp = (p: { cls?: ClassId }) => cls(p).maxHp;
 
-/**
- * 팀 안 index번째 시작 위치에 선 물리 상태.
- * NEON은 팀이 아니라 역할(공격/수비) 스폰이고, 준비 시간이면 그 역할의 결계(해제 시각)를 몸에 붙인다.
- */
-function spawnBody(team: Team, index: number, now: number, st?: { map?: MapId; attackingTeam: Team; phase: Phase; phaseEndsAt: number | null }): Body {
-  if (st?.map === "NEON") {
-    const role: BarrierRole = team === st.attackingTeam ? "atk" : "def";
-    const p = NEON_SPAWNS[role][Math.min(index, 1)]!;
-    const b = makeBody(p.x, p.y, now);
-    if (st.phase === "COUNTDOWN" && st.phaseEndsAt !== null) { b.bu = st.phaseEndsAt; b.br = role; }
-    return b;
-  }
-  const list = SPAWNS[team];
-  const p = list[Math.min(index, list.length - 1)]!;
-  return makeBody(p.x, p.y, now);
-}
-
-/** 작업을 그 시각 진행률로 멈춘다 (아무도 누르지 않음, 더 바뀌지 않음) */
-function frozen(w: WorkState, now: number): WorkState {
-  // 멈춘 사이트의 progress = 부서진 정도 (수리 진행률은 1 - 로 바꿔 둔다)
-  const p = progressAt(w, now);
-  return { kind: null, progress: w.kind === "REPAIR" ? 1 - p : p, since: now, holders: [] };
+/** 팀 안 index번째 시작(부활) 위치에 선 물리 상태. 직업별 걷는 속도도 붙인다 */
+function spawnBody(p: { team: Team; cls?: ClassId }, index: number, now: number, map: MapId = "CLASSIC"): Body {
+  const list = map === "NEON" ? NEON_SPAWNS[p.team] : SPAWNS[p.team];
+  const at = list[index % list.length]!;
+  const b = makeBody(at.x, at.y, now);
+  if (cls(p).speed !== PHYS.SPEED) b.v = cls(p).speed; // 직업별 걷는 속도 (물리가 몸 상태로 계산)
+  return b;
 }
 
 /** 지금 시각에 그 자리에 멈춘 상태 */
@@ -235,19 +162,11 @@ function safeEqual(a: string, b: string): boolean {
 
 /** 경기 기록 초기값 */
 function freshMatch() {
-  return {
-    roundEnd: null,
-    score: { A: 0, B: 0 },
-    history: [] as RoundRecord[],
-    turn: { attackingTeam: FIRST_ATTACKING_TEAM, roundsInTurn: 0 } as Turn,
-    matchWinner: null,
-    matchEndReason: null,
-    practice: false,
-  };
+  return { score: { A: 0, B: 0 }, matchWinner: null, matchEndReason: null, practice: false };
 }
 
 function emptyState(code: string): RoomState {
-  return { code, ...initialPhase(), map: "CLASSIC", work: workForPhase("LOBBY", 0), sites: null, ...freshMatch(), players: [], deadlines: [] };
+  return { code, ...initialPhase(), map: "CLASSIC", ...freshMatch(), players: [], deadlines: [] };
 }
 
 /** 1초 창 안에서 limit 개까지 허용 */
@@ -388,7 +307,7 @@ export class GameRoom extends DurableObject<Env> {
       conn: "CONNECTED",
       reconnectDeadline: null,
       ready: false,
-      body: spawnBody(team, st.players.filter((p) => p.team === team).length, now, st),
+      body: spawnBody({ team }, st.players.filter((p) => p.team === team).length, now, st.map),
       wantA: -1,
       seq: 0,
       c: newCombat(),
@@ -440,7 +359,7 @@ export class GameRoom extends DurableObject<Env> {
         // 기기 직접 연결의 빠른 통로는 순서를 지키지 않으므로, 더 새 입력보다 늦게 온 이동은 버린다
         if (msg.t === "move" && msg.s < player.seq) return;
         player.seq = Math.max(player.seq, msg.s);
-        // 작업/치유 중이거나 기절/사망이면 그 자리에 고정 (이동 의도만 기억했다가 풀리면 적용)
+        // 경기 중이 아니거나 죽었으면 그 자리에 고정 (이동 의도만 기억했다가 풀리면 적용)
         const movable = this.canMoveNow(player);
         // 화면에서 누른 시각 기준으로 처리 (화면 예측과 같은 계산 → 내 캐릭터가 뒤로 당겨지지 않음)
         const at = inputTime(msg.at, player.body.t, now);
@@ -466,59 +385,14 @@ export class GameRoom extends DurableObject<Env> {
         return;
       }
 
-      case "hold_start": {
-        const reason = this.performHoldStart(player, now);
-        if (reason) return this.sendError(ws, "cannot_work", HOLD_REJECT_TEXT[reason]);
-        await this.commit();
-        this.broadcastMove(player);
-        this.broadcastWork(now);
-        return;
-      }
-
-      case "hold_stop":
-        if (!this.releaseHold(player, now)) return; // 누르고 있지 않았으면 무시
-        await this.commit();
-        this.broadcastMove(player);
-        this.broadcastWork(now);
-        return;
-
       case "attack": {
-        const reason = checkAttack(player.c, st.phase, this.isHolding(player.id), now, cls(player).cooldownMs);
+        const reason = checkAttack(player.c, st.phase, now, cls(player).cooldownMs);
         if (reason) return this.sendError(ws, "cannot_attack", ATTACK_REJECT_TEXT[reason]!);
-        const hit = this.performAttack(player, msg.yaw, msg.pitch, now);
-        await this.commit();
-        this.broadcastRoomState(now);
-        if (hit) this.broadcastWork(now); // 기절로 작업이 멈췄을 수 있음
-        return;
-      }
-
-      case "revive_start": {
-        // 근처(1.5m, 높이 차 1.2m)의 기절한 같은 팀원 중 가장 가까운 사람
-        const me = simulate(player.body, now);
-        let target: PlayerRecord | null = null;
-        let best = Infinity;
-        for (const p of st.players) {
-          if (p.id === player.id || p.team !== player.team || p.c.state !== "DOWNED") continue;
-          const b = simulate(p.body, now);
-          if (!inReach(me, b, AIM.REVIVE_RANGE, AIM.REVIVE_MAX_HEIGHT_DIFF)) continue;
-          const d = Math.hypot(me.x - b.x, me.y - b.y);
-          if (d < best) { best = d; target = p; }
-        }
-        const reason = checkReviveStart(player.c, st.phase, this.isHolding(player.id), target?.c ?? null);
-        if (reason || !target) return this.sendError(ws, "cannot_revive", REVIVE_REJECT_TEXT[reason ?? "no_target"]!);
-        player.c = startRevive(player.c, target.id, now);
-        st.deadlines = upsertDeadline(st.deadlines, { kind: "revive", key: player.id, at: player.c.revive!.endsAt });
-        this.refreshMotion(player, now); // 치유 중에는 제자리 고정
+        this.performAttack(player, msg.yaw, msg.pitch, now);
         await this.commit();
         this.broadcastRoomState(now);
         return;
       }
-
-      case "revive_stop":
-        if (!this.cancelRevive(player, now)) return;
-        await this.commit();
-        this.broadcastRoomState(now);
-        return;
 
       case "debug_score":
         if (this.env.DEBUG_COMMANDS !== "true") return this.sendError(ws, "debug_disabled", "디버그 명령이 꺼져 있어요");
@@ -541,7 +415,7 @@ export class GameRoom extends DurableObject<Env> {
           st.players.push({
             id: randomHex(6), token: randomHex(SESSION_TOKEN_BYTES), nickname: `더미${n}`, team,
             conn: "CONNECTED", reconnectDeadline: null, ready: true,
-            body: spawnBody(team, st.players.filter((p) => p.team === team).length, now, st),
+            body: spawnBody({ team }, st.players.filter((p) => p.team === team).length, now, st.map),
             wantA: -1, seq: 0, c: newCombat(), bot: true,
           });
         }
@@ -575,7 +449,7 @@ export class GameRoom extends DurableObject<Env> {
         st.map = msg.map;
         // 로비에서도 고른 맵에 서 있도록 시작 위치로 옮긴다
         for (const team of ["A", "B"] as const) {
-          st.players.filter((p) => p.team === team).forEach((p, i) => { p.body = spawnBody(team, i, now, st); });
+          st.players.filter((p) => p.team === team).forEach((p, i) => { p.body = spawnBody(p, i, now, st.map); });
         }
         this.mustSave = true;
         await this.commit();
@@ -602,11 +476,9 @@ export class GameRoom extends DurableObject<Env> {
         const m = MAPS[st.map ?? "CLASSIC"], H = 0.4;
         const x = Math.min(m.x1 - H, Math.max(m.x0 + H, msg.x));
         const y = Math.min(m.y1 - H, Math.max(m.y0 + H, msg.y));
-        this.releaseHold(player, now);
-        player.body = { ...makeBody(x, y, now), z: groundHeightAt(x, y, 100), bu: player.body.bu, br: player.body.br, v: player.body.v };
+        player.body = { ...makeBody(x, y, now), z: groundHeightAt(x, y, 100), v: player.body.v };
         this.markDirty();
         this.broadcastMove(player);
-        this.broadcastWork(now);
         return;
       }
 
@@ -653,13 +525,10 @@ export class GameRoom extends DurableObject<Env> {
       this.mustSave = true;
       player.reconnectDeadline = now + RECONNECT_GRACE_MS;
       player.wantA = -1;
-      this.releaseHold(player, now); // 작업 중이었다면 중단
-      this.cancelRevive(player, now); // 치유 중이었다면 중단
       player.body = stopped(player.body, now); // 재접속 대기 중에는 정지
       st.deadlines = upsertDeadline(st.deadlines, { kind: "reconnect", key: player.id, at: player.reconnectDeadline });
       await this.commit();
       this.broadcastRoomState(now);
-      this.broadcastWork(now);
     }
     await this.cleanupIfEmpty();
   }
@@ -690,41 +559,14 @@ export class GameRoom extends DurableObject<Env> {
       st.deadlines = rest;
       for (const d of due) {
         if (d.kind === "phase") {
-          // 단계 제한 시간 종료 (원래 마감 시각 기준으로 계산)
+          // 단계 제한 시간 종료 (원래 마감 시각 기준으로 계산). 경기 시간이 끝나면 킬이 많은 팀 승리
           if (st.phaseEndsAt === null || st.phaseEndsAt > now) continue;
-          if (st.phase === "ATTACK") this.endRound("break_timeout", d.at); // 2분 안에 못 부숨
-          else if (st.phase === "REPAIR") this.endRound("repair_fail", d.at, this.repairSite() ?? undefined); // 1분 안에 못 고침
-          else if (st.phase === "ROUND_END") this.advanceAfterRound(d.at);
-          else this.applyPhase(nextOnTimeout(st, d.at), d.at); // COUNTDOWN → ATTACK
-        } else if (d.kind === "work" && (d.key === "A" || d.key === "B")) {
-          // NEON: 먼저 부서진 건물 하나로 REPAIR(그 건물만 수리), 수리 완료면 수비팀 승리. 단계가 바뀌면 작업 마감이
-          // 모두 지워지고 다른 건물은 멈추므로, 같은 시각에 다른 건물 마감이 있어도 한 번만 처리된다
-          const w = st.sites?.[d.key];
-          if (!w || !isComplete(w, d.at)) continue;
-          if (st.phase === "ATTACK" && w.kind === "BREAK") {
-            this.applyPhase(nextOnWorkComplete(st, "BREAK", d.at), d.at, d.key);
-            this.checkWipe(d.at); // REPAIR 시작 순간 수비팀이 이미 전멸이면 바로 종료
-          } else if (st.phase === "REPAIR" && w.kind === "REPAIR") this.endRound("repair_success", d.at, d.key);
-        } else if (d.kind === "work") {
-          // 집 작업 100% → 부수기 완료는 REPAIR, 수리 완료는 ROUND_END (판정 시각은 완료 예정 시각)
-          const kind = st.work.kind;
-          if (kind === "REPAIR" && isComplete(st.work, d.at)) {
-            this.endRound("repair_success", d.at);
-          } else if (kind === "BREAK" && isComplete(st.work, d.at)) {
-            this.applyPhase(nextOnWorkComplete(st, kind, d.at), d.at);
-            this.checkWipe(d.at); // REPAIR 시작 순간 수비팀이 이미 전멸이면 바로 종료
-          }
+          if (st.phase === "PLAY") this.endMatch(timeUpWinner(st.score), "time", d.at);
+          else this.applyPhase(nextOnTimeout(st, d.at), d.at);
         } else if (d.kind === "bot") {
           this.botsThink(d.at);
-        } else if (d.kind === "revive") {
-          this.onReviveDue(d.key, d.at);
-        } else if (d.kind === "death") {
-          // 기절 후 20초 동안 치유받지 못함 → 사망
-          const p = st.players.find((x) => x.id === d.key);
-          if (p && p.c.state === "DOWNED" && p.c.deathAt !== null && p.c.deathAt <= d.at) {
-            p.c = applyDeath(p.c);
-            for (const q of st.players) if (q.c.revive?.target === p.id) this.cancelRevive(q, d.at); // 대상이 죽으면 치유 중단
-          }
+        } else if (d.kind === "respawn") {
+          this.onRespawnDue(d.key, d.at);
         } else if (d.kind === "reconnect") {
           // 재접속 대기 시간 초과 → 이탈 처리
           const p = st.players.find((x) => x.id === d.key && x.conn === "RECONNECTING");
@@ -741,40 +583,10 @@ export class GameRoom extends DurableObject<Env> {
     }
   }
 
-  // ---------- 집 작업 ----------
-  private isHolding(playerId: string): boolean {
-    return (this.state?.work.holders.includes(playerId) ?? false) || this.holdingSite(playerId) !== null;
-  }
-
-  /** NEON REPAIR: 수리 중인(부서진) 사이트 */
-  private repairSite(): SiteId | null {
-    const s = this.state?.sites;
-    return s ? (s.A.kind === "REPAIR" ? "A" : s.B.kind === "REPAIR" ? "B" : null) : null;
-  }
-
-  /** NEON: 이 플레이어가 부수고 있는 사이트 */
-  private holdingSite(playerId: string): SiteId | null {
-    const sites = this.state?.sites;
-    if (!sites) return null;
-    return sites.A.holders.includes(playerId) ? "A" : sites.B.holders.includes(playerId) ? "B" : null;
-  }
-
-  /** 이 플레이어의 작업을 중단 (버튼 뗌/접속 끊김/퇴장). 중단했으면 true */
-  private releaseHold(player: PlayerRecord, now: number): boolean {
-    const st = this.state!;
-    const site = this.holdingSite(player.id);
-    if (site) st.sites![site] = stopHold(st.sites![site], player.id, now);
-    else if (st.work.holders.includes(player.id)) st.work = stopHold(st.work, player.id, now);
-    else return false;
-    this.refreshMotion(player, now); // 고정 해제: 누르고 있던 이동 방향이 있으면 바로 출발
-    this.scheduleWork();
-    return true;
-  }
-
   // ---------- 전투 ----------
-  /** 지금 움직일 수 있는지: 이동 단계 + 정상 상태 + 작업/치유 중 아님 + 접속 중 */
+  /** 지금 움직일 수 있는지: 경기 중 + 살아 있음 + 접속 중 */
   private canMoveNow(p: PlayerRecord): boolean {
-    return canMoveIn(this.state!.phase, this.state!.map) && p.conn === "CONNECTED" && p.c.state === "NORMAL" && !p.c.revive && !this.isHolding(p.id);
+    return canMoveIn(this.state!.phase) && p.conn === "CONNECTED" && p.c.state === "NORMAL";
   }
 
   /** 상태에 맞게 이동을 다시 맞춘다 (움직일 수 있으면 원하는 방향으로, 아니면 정지) */
@@ -786,45 +598,18 @@ export class GameRoom extends DurableObject<Env> {
     }
   }
 
-  /** 기절 처리: 작업/치유 즉시 중단, 정지, 사망 타이머 등록 */
-  private onDowned(p: PlayerRecord, now: number) {
+  /** 부활 시각: 우리 팀 시작 위치에서 체력 가득 + 잠깐 무적 */
+  private onRespawnDue(id: string, at: number) {
     const st = this.state!;
-    this.releaseHold(p, now); // (resolveHit에서 이미 빠졌으면 아무 일 없음)
-    this.scheduleWork(); // 작업 완료 예정 시각 다시 계산
-    st.deadlines = removeDeadline(st.deadlines, "revive", p.id); // applyHit이 revive 기록은 이미 지움
-    this.refreshMotion(p, now);
-    st.deadlines = upsertDeadline(st.deadlines, { kind: "death", key: p.id, at: p.c.deathAt! });
-  }
-
-  /** 치유 중단 (버튼 뗌/기절/대상 사망/접속 끊김). 중단했으면 true */
-  private cancelRevive(p: PlayerRecord, now: number): boolean {
-    if (!p.c.revive) return false;
-    p.c = stopRevive(p.c);
-    this.state!.deadlines = removeDeadline(this.state!.deadlines, "revive", p.id);
-    this.refreshMotion(p, now);
-    return true;
-  }
-
-  /** 치유 완료 시각 도달: 대상이 아직 기절 상태면 부활 */
-  private onReviveDue(reviverId: string, at: number) {
-    const st = this.state!;
-    const r = st.players.find((x) => x.id === reviverId);
-    if (!r?.c.revive || r.c.revive.endsAt > at) return;
-    const target = st.players.find((x) => x.id === r.c.revive!.target);
-    if (target && target.c.state === "DOWNED") {
-      target.c = completeRevive(target.c, at, maxHp(target));
-      st.deadlines = removeDeadline(st.deadlines, "death", target.id);
-      this.refreshMotion(target, at);
-    }
-    this.cancelRevive(r, at);
-  }
-
-  /** 전멸 확인: 라운드를 끝내야 하면 ROUND_END로 */
-  private checkWipe(now: number) {
-    const st = this.state!;
-    const teams = { A: st.players.filter((p) => p.team === "A").map((p) => p.c), B: st.players.filter((p) => p.team === "B").map((p) => p.c) };
-    if (!wipeWinner(st.phase, st.attackingTeam, teams)) return;
-    this.endRound(st.phase === "ATTACK" ? "attackers_wiped" : "defenders_wiped", now);
+    const p = st.players.find((x) => x.id === id);
+    if (!p || p.c.state !== "DEAD" || st.phase !== "PLAY") return;
+    p.c = respawn(p.c, at, maxHp(p));
+    // 같은 팀 두 명이 번갈아 두 시작 위치를 쓴다 (죽은 횟수로 고름 → 한 자리에 겹치지 않게)
+    p.body = spawnBody(p, st.players.filter((q) => q.team === p.team).indexOf(p) + p.c.deaths, at, st.map);
+    this.refreshMotion(p, at);
+    if (p.bot) p.plan = planFor(p.team, st.players.filter((q) => q.bot && q.team === p.team).indexOf(p), st.map ?? "CLASSIC", p.body);
+    this.broadcastMove(p);
+    this.scheduleBots(at, 50);
   }
 
   // ---------- 사람과 더미가 같이 쓰는 행동 ----------
@@ -848,17 +633,25 @@ export class GameRoom extends DurableObject<Env> {
     return hit?.p ?? null;
   }
 
-  /** 맞은 뒤 처리 (근접/화살 공통): 체력, 기절, swing 방송, 전멸 확인 */
+  /** 맞은 뒤 처리 (근접/화살 공통): 체력, 죽으면 킬 점수·부활 예약, swing 방송, 15킬이면 경기 끝 */
   private landHit(by: string, target: PlayerRecord | null, now: number, damage: number) {
     const st = this.state!;
     if (target) {
-      const r = resolveHit(target.c, target.id, st.work, now, damage); // 맞아도 작업 유지, 기절하면 작업 중단
-      target.c = r.c;
-      st.work = r.work;
-      if (target.c.state === "DOWNED") this.onDowned(target, now);
+      const wasAlive = target.c.state === "NORMAL";
+      target.c = applyHit(target.c, now, damage);
+      if (wasAlive && target.c.state === "DEAD") {
+        const killer = st.players.find((p) => p.id === by);
+        if (killer) {
+          killer.c = { ...killer.c, kills: killer.c.kills + 1 };
+          st.score = addKill(st.score, killer.team);
+        }
+        st.deadlines = upsertDeadline(st.deadlines, { kind: "respawn", key: target.id, at: target.c.respawnAt! });
+        this.refreshMotion(target, now); // 죽으면 그 자리에 멈춤
+      }
     }
     this.broadcast({ t: "swing", by, target: target?.id ?? null, serverTime: now });
-    this.checkWipe(now);
+    const winner = killWinner(st.score);
+    if (winner) this.endMatch(winner, "score", now);
   }
 
   /** 화살: 쏜 걸 알리고 50ms마다 지나간 구간을 판정. 메모리 타이머만 쓰고 저장하지 않는다 (0.4초면 끝남) */
@@ -875,7 +668,6 @@ export class GameRoom extends DurableObject<Env> {
         this.landHit(shooter.id, r.hit, to, cls(shooter).damage);
         await this.commit();
         this.broadcastRoomState(to);
-        this.broadcastWork(to); // 기절로 작업이 멈췄을 수 있음
       } else if (!r.stopped) {
         from = to;
         setTimeout(step, ARROW.STEP_MS);
@@ -884,36 +676,11 @@ export class GameRoom extends DurableObject<Env> {
     setTimeout(step, ARROW.STEP_MS);
   }
 
-  /** 집 작업 시작. 안 되면 이유를 돌려준다 */
-  private performHoldStart(player: PlayerRecord, now: number): HoldRejectReason | null {
-    const st = this.state!;
-    const body = simulate(player.body, now);
-    const target = targetHouseTeam(st.attackingTeam);
-    // NEON: 가까운 사이트 건물 (A/B 따로 체력)
-    const site = st.map === "NEON" ? (["A", "B"] as const).find((s) => isNearSite(s, body.x, body.y, body.z)) ?? null : null;
-    const reason = checkHoldStart({
-      phase: st.phase,
-      attackingTeam: st.attackingTeam,
-      playerTeam: player.team,
-      connected: player.conn === "CONNECTED",
-      normal: player.c.state === "NORMAL",
-      reviving: player.c.revive !== null,
-      nearTarget: st.map === "NEON" ? site !== null && !!st.sites?.[site].kind : isNearHouse(target, body.x, body.y, body.z),
-      alreadyHolding: this.isHolding(player.id),
-    });
-    if (reason) return reason;
-    player.body = stopped(player.body, now); // 작업 중에는 제자리 고정
-    if (site) st.sites![site] = startHold(st.sites![site], player.id, now);
-    else st.work = startHold(st.work, player.id, now);
-    this.scheduleWork();
-    return null;
-  }
-
   // ---------- 연습용 더미 ----------
-  /** 더미가 있고 공격/수리 단계면 delay 뒤에 생각하도록 마감 시각을 건다 (아니면 지운다) */
+  /** 더미가 있고 경기 중이면 delay 뒤에 생각하도록 마감 시각을 건다 (아니면 지운다) */
   private scheduleBots(now: number, delay: number) {
     const st = this.state!;
-    const active = canMoveIn(st.phase, st.map) && st.players.some((p) => p.bot && p.c.state === "NORMAL");
+    const active = canMoveIn(st.phase) && st.players.some((p) => p.bot);
     st.deadlines = active
       ? upsertDeadline(st.deadlines, { kind: "bot", key: "think", at: now + delay })
       : removeDeadline(st.deadlines, "bot", "think");
@@ -922,7 +689,7 @@ export class GameRoom extends DurableObject<Env> {
   /** 더미들이 생각하고 움직인다 (알람으로 불림) */
   private botsThink(now: number) {
     const st = this.state!;
-    if (!canMoveIn(st.phase, st.map)) return;
+    if (!canMoveIn(st.phase)) return;
     let next = BOT_THINK_MS;
     let changed = false;
     const seen = (p: PlayerRecord) => ({ id: p.id, team: p.team, body: simulate(p.body, now), c: p.c });
@@ -930,26 +697,24 @@ export class GameRoom extends DurableObject<Env> {
       if (!bot.bot || !bot.plan) continue;
       const me = seen(bot);
       const enemies = st.players.filter((p) => p.team !== bot.team && now >= (p.c.stealthUntil ?? 0)).map(seen); // 은신한 상대는 못 본다
-      const canAttack = !checkAttack(bot.c, st.phase, this.isHolding(bot.id), now, cls(bot).cooldownMs) && now - bot.c.lastAttackAt >= BOT_ATTACK_COOLDOWN_MS;
-      const d = decide(me, bot.plan, enemies, { phase: st.phase, attackingTeam: st.attackingTeam, holding: this.isHolding(bot.id), canAttack, proj: cls(bot).proj ?? null });
+      const canAttack = !checkAttack(bot.c, st.phase, now, cls(bot).cooldownMs) && now - bot.c.lastAttackAt >= BOT_ATTACK_COOLDOWN_MS;
+      const d = decide(me, bot.plan, enemies, { canAttack, proj: cls(bot).proj ?? null });
       if (d.attack) {
-        const hit = this.performAttack(bot, d.attack.yaw, d.attack.pitch, now);
+        this.performAttack(bot, d.attack.yaw, d.attack.pitch, now);
         changed = true;
-        if (hit) this.broadcastWork(now);
-        if (!canMoveIn(st.phase, st.map)) return; // 전멸로 라운드가 끝났으면 그만
+        if (!canMoveIn(st.phase)) return; // 15킬로 경기가 끝났으면 그만
       }
-      if (d.holdStart && !this.performHoldStart(bot, now)) {
-        changed = true;
-        this.broadcastMove(bot);
-        this.broadcastWork(now);
+      if (d.arrived) {
+        // 길 끝: 상대 진영 ↔ 맵 가운데를 오가며 순찰
+        const slot = st.players.filter((q) => q.bot && q.team === bot.team).indexOf(bot);
+        bot.plan = planFor(bot.team, slot, st.map ?? "CLASSIC", me.body, !bot.plan.back);
+        next = Math.min(next, 120);
       }
-      if (!this.isHolding(bot.id)) {
-        const before = bot.body.a;
-        bot.wantA = d.angle;
-        if (d.angle >= 0) bot.faceA = d.angle;
-        this.refreshMotion(bot, now);
-        if (bot.body.a !== before) this.broadcastMove(bot);
-      }
+      const before = bot.body.a;
+      bot.wantA = d.angle;
+      if (d.angle >= 0) bot.faceA = d.angle;
+      this.refreshMotion(bot, now);
+      if (bot.body.a !== before) this.broadcastMove(bot);
       if (d.enemyNear) next = Math.min(next, BOT_THINK_NEAR_MS);
       // 다음 지점에 도착할 때쯤 다시 생각 (지나치지 않게)
       if (bot.body.a >= 0) {
@@ -962,56 +727,13 @@ export class GameRoom extends DurableObject<Env> {
     this.markDirty();
   }
 
-  // ---------- 점수 ----------
-  /** 라운드 종료: 승점 반영, 기록 추가, ROUND_END(5초) */
-  private endRound(reason: RoundEndReason, at: number, site?: SiteId) {
+  /** 경기 끝: 이긴 팀(무승부면 null)과 이유를 남기고 결과 화면으로 */
+  private endMatch(winner: Team | null, reason: "score" | "time", at: number) {
     const st = this.state!;
-    if (st.phase !== "ATTACK" && st.phase !== "REPAIR") return;
-    const winner = roundWinner(reason, st.attackingTeam);
-    st.score = addPoint(st.score, winner);
-    st.history = [...st.history, { round: st.round, winner, reason, attackingTeam: st.attackingTeam }];
-    this.applyPhase(enterPhase(st, "ROUND_END", at), at);
-    st.roundEnd = site ? { winner, reason, site } : { winner, reason };
-  }
-
-  /** ROUND_END가 끝나면: 승리 조건이면 MATCH_END, 아니면 다음 라운드 (공수 교대 반영) */
-  private advanceAfterRound(at: number) {
-    const st = this.state!;
-    const winner = matchWinner(st.score);
-    if (winner) {
-      st.matchWinner = winner;
-      st.matchEndReason = "score";
-      this.applyPhase(enterPhase(st, "MATCH_END", at), at);
-      return;
-    }
-    st.turn = nextTurn(st.turn, st.score);
-    this.applyPhase(enterPhase({ ...st, round: st.round + 1, attackingTeam: st.turn.attackingTeam }, "COUNTDOWN", at), at);
-  }
-
-  /** 작업 완료 예정 시각을 마감 시각 목록에 넣는다 (아무도 안 누르면 제거) */
-  private scheduleWork() {
-    const st = this.state!;
-    const works: [string, WorkState][] = [["work", st.work]];
-    if (st.sites) works.push(["A", st.sites.A], ["B", st.sites.B]);
-    for (const [key, w] of works) {
-      const at = completionAt(w);
-      st.deadlines = at === null
-        ? removeDeadline(st.deadlines, "work", key)
-        : upsertDeadline(st.deadlines, { kind: "work", key, at });
-    }
-  }
-
-  private workInfo(w: WorkState = this.state!.work): WorkInfo {
-    return { ...w, rate: workRate(w), completesAt: completionAt(w), checkpoint: DEFAULT_WORK_RULES.checkpoint };
-  }
-
-  private sitesInfo(): Record<SiteId, WorkInfo> | null {
-    const s = this.state?.sites;
-    return s ? { A: this.workInfo(s.A), B: this.workInfo(s.B) } : null;
-  }
-
-  private broadcastWork(now: number) {
-    if (this.state) this.broadcast({ t: "work", work: this.workInfo(), sites: this.sitesInfo(), serverTime: now });
+    if (st.phase !== "PLAY") return;
+    st.matchWinner = winner;
+    st.matchEndReason = reason;
+    this.applyPhase(enterPhase(st, "MATCH_END", at), at);
   }
 
   // ---------- 단계 전환 ----------
@@ -1020,71 +742,45 @@ export class GameRoom extends DurableObject<Env> {
     const st = this.state!;
     for (const p of st.players) {
       if (p.bot) p.cls = CLASS_IDS[Math.floor(Math.random() * CLASS_IDS.length)]!;
-      p.c = newCombat(maxHp(p)); // 누적 기절/사망 횟수도 0
       p.ready = true;
     }
     Object.assign(st, freshMatch());
     st.practice = practice;
-    this.applyPhase(startMatch(now), now);
+    this.applyPhase(startMatch(st, now), now);
   }
 
-  /** 새 단계 상태를 적용하고, 단계에 따른 부수 효과(위치 초기화, 정지, 마감 시각)를 처리 */
-  /** brokenSite = NEON에서 ATTACK→REPAIR로 넘어갈 때 부서진 건물 (그 건물만 수리 대상) */
-  private applyPhase(next: PhaseState, now: number, brokenSite?: SiteId) {
+  /** 새 단계 상태를 적용하고, 단계에 따른 부수 효과(위치·체력 초기화, 정지, 마감 시각)를 처리 */
+  private applyPhase(next: PhaseState, now: number) {
     const st = this.state!;
-    const enteredNewRound = next.phase === "COUNTDOWN" && (st.phase !== "COUNTDOWN" || st.round !== next.round);
-    const phaseChanged = next.phase !== st.phase || next.round !== st.round;
-    // 단계가 바뀌면 작업은 중단되고, 새 단계에 맞는 작업(0%)으로 초기화
-    if (next.phase !== st.phase || next.round !== st.round) {
-      const neon = st.map === "NEON";
-      st.work = workForPhase(neon ? "LOBBY" : next.phase, now); // NEON은 사이트별 작업만 쓴다
-      st.deadlines = st.deadlines.filter((d) => d.kind !== "work");
-      // NEON 사이트: 공격 단계에 새로 시작, 부서지면 그 건물만 수리(0%부터), 다른 건물과 라운드 종료 때는 그대로 멈춘다
-      st.sites = !neon ? null
-        : next.phase === "ATTACK" ? { A: workForPhase("ATTACK", now), B: workForPhase("ATTACK", now) }
-        : next.phase === "REPAIR" && st.sites && brokenSite
-          ? { A: brokenSite === "A" ? workForPhase("REPAIR", now) : frozen(st.sites.A, now), B: brokenSite === "B" ? workForPhase("REPAIR", now) : frozen(st.sites.B, now) }
-        : next.phase === "ROUND_END" && st.sites ? { A: frozen(st.sites.A, now), B: frozen(st.sites.B, now) }
-        : { A: workForPhase("LOBBY", now), B: workForPhase("LOBBY", now) };
-    }
+    const phaseChanged = next.phase !== st.phase;
     st.phase = next.phase;
-    st.round = next.round;
-    st.attackingTeam = next.attackingTeam;
     st.phaseEndsAt = next.phaseEndsAt;
 
-    // 라운드가 끝나거나 새로 시작되면 치유는 중단되고 사망 타이머도 없어진다 (ATTACK→REPAIR는 같은 라운드라 유지)
-    if (!canMoveIn(st.phase)) {
-      for (const p of st.players) p.c = stopRevive(p.c);
-      st.deadlines = st.deadlines.filter((d) => d.kind !== "revive" && d.kind !== "death");
-    }
     if (st.phase === "LOBBY") {
       for (const p of st.players) { p.ready = false; p.c = newCombat(maxHp(p)); }
       Object.assign(st, freshMatch());
     }
-    if (enteredNewRound) {
-      st.roundEnd = null;
-      // 라운드 시작: 체력/상태 초기화(사망자도 부활), 팀별 시작 위치로
+    if (st.phase !== "PLAY") st.deadlines = st.deadlines.filter((d) => d.kind !== "respawn");
+    if (phaseChanged && st.phase === "COUNTDOWN") {
+      // 시작 직전: 고른 직업의 체력으로, 팀별 시작 위치에 (킬/데스 0)
       for (const team of ["A", "B"] as const) {
         st.players.filter((p) => p.team === team).forEach((p, i) => {
-          p.c = resetForRound(p.c, maxHp(p)); // 직업 선택 후 첫 라운드에서 고른 직업 체력이 적용된다
-          p.body = spawnBody(team, i, now, st);
-          if (cls(p).speed !== PHYS.SPEED) p.body.v = cls(p).speed; // 직업별 걷는 속도 (물리가 몸 상태로 계산)
-          this.refreshMotion(p, now); // NEON 준비 시간은 이동 가능: 누르고 있던 방향으로 바로 출발
+          p.c = newCombat(maxHp(p));
+          p.body = spawnBody(p, i, now, st.map);
         });
       }
-    } else {
-      // 이동 가능해지면 누르고 있던 방향으로 바로 출발, 불가능해지면 정지 (작업이 끝난 사람의 고정도 풀림)
-      for (const p of st.players) this.refreshMotion(p, now);
     }
+    // 이동 가능해지면 누르고 있던 방향으로 바로 출발, 불가능해지면 정지
+    for (const p of st.players) this.refreshMotion(p, now);
 
     st.deadlines = st.phaseEndsAt === null
       ? removeDeadline(st.deadlines, "phase", "phase")
       : upsertDeadline(st.deadlines, { kind: "phase", key: "phase", at: st.phaseEndsAt });
-    // 더미: 공격/수리 단계가 새로 시작되면 계획을 세우고 생각하기 시작, 아니면 멈춤
-    if (phaseChanged && canMoveIn(st.phase, st.map)) {
+    // 더미: 경기가 시작되면 순찰 계획을 세우고 생각하기 시작, 아니면 멈춤
+    if (phaseChanged && st.phase === "PLAY") {
       for (const team of ["A", "B"] as const) {
         st.players.filter((p) => p.bot && p.team === team).forEach((p, i) => {
-          p.plan = planFor(team, st.phase, st.attackingTeam, i, st.map, simulate(p.body, now), this.repairSite() ?? undefined);
+          p.plan = planFor(team, i, st.map ?? "CLASSIC", simulate(p.body, now));
         });
       }
     }
@@ -1138,10 +834,6 @@ export class GameRoom extends DurableObject<Env> {
   /** 플레이어 제거. 게임 중에 인원이 빠지면 (임시 규칙) 로비로 돌아간다 */
   private async removePlayers(ids: string[], now: number) {
     const st = await this.load();
-    for (const p of st.players) {
-      if (ids.includes(p.id)) { this.releaseHold(p, now); this.cancelRevive(p, now); }
-      else if (p.c.revive && ids.includes(p.c.revive.target)) this.cancelRevive(p, now);
-    }
     st.players = st.players.filter((p) => !ids.includes(p.id));
     if (!st.players.some((p) => !p.bot)) st.players = []; // 사람이 아무도 없으면 더미도 정리
     this.mustSave = true;
@@ -1212,11 +904,10 @@ export class GameRoom extends DurableObject<Env> {
       combat: {
         hp: p.c.hp,
         state: p.c.state,
-        deathAt: p.c.deathAt,
+        respawnAt: p.c.respawnAt,
         invulnUntil: p.c.invulnUntil,
-        downs: p.c.downs,
+        kills: p.c.kills,
         deaths: p.c.deaths,
-        revive: p.c.revive,
         attackReadyAt: p.c.lastAttackAt + cls(p).cooldownMs,
         stealthUntil: p.c.stealthUntil,
         stealthReadyAt: p.c.stealthReadyAt,
@@ -1235,18 +926,9 @@ export class GameRoom extends DurableObject<Env> {
       t: "room_state",
       room: st.code,
       phase: st.phase,
-      round: st.round,
-      attackingTeam: st.attackingTeam,
       phaseEndsAt: st.phaseEndsAt,
-      work: this.workInfo(),
-      roundEnd: st.roundEnd,
       map: st.map ?? "CLASSIC",
-      sites: this.sitesInfo(),
-      barrierUntil: st.map === "NEON" && st.phase === "COUNTDOWN" ? st.phaseEndsAt : null,
       score: st.score,
-      history: st.history,
-      matchPoint: st.phase === "MATCH_END" ? [] : matchPointTeams(st.score),
-      deuce: isDeuce(st.score),
       matchWinner: st.matchWinner,
       matchEndReason: st.matchEndReason,
       practice: st.practice,

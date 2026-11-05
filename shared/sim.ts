@@ -1,6 +1,6 @@
 // 결정적(deterministic) 이동 시뮬레이션. 서버와 클라이언트가 똑같이 실행한다.
 // 서버는 매 프레임 계산하지 않고, 이벤트가 올 때 "마지막 시각부터 지금까지"를 한 번에 계산한다.
-import { BARRIERS, BOXES_BY_MAP, type BarrierRole, type Box, MAPS, PHYS, mapAt } from "./world";
+import { BOXES_BY_MAP, type Box, MAPS, PHYS, mapAt } from "./world";
 
 /** 캐릭터의 물리 상태 */
 export interface Body {
@@ -16,9 +16,6 @@ export interface Body {
   g: boolean;
   /** 이 상태의 서버 기준 시각 (ms) */
   t: number;
-  /** 준비 시간 결계가 사라지는 서버 시각 (없으면 결계 없음). 이 시각 전까지 br 역할의 결계에 막힌다 */
-  bu?: number;
-  br?: BarrierRole;
   /** 걷는 속도 (m/s, 직업별). 없으면 기본 속도 */
   v?: number;
   /** 앉아 있는지 (키가 낮아지고 느려짐) */
@@ -111,14 +108,6 @@ function moveAxis(b: Body, axis: "x" | "y", d: number) {
     if (axis === "x") nx = d > 0 ? box.x0 - H : box.x1 + H;
     else ny = d > 0 ? box.y0 - H : box.y1 + H;
   }
-  // 준비 시간 결계: 높이와 상관없이 막는다 (해제 시각 전, 내 역할에 해당하는 것만)
-  if (b.bu !== undefined && b.t < b.bu) {
-    for (const w of BARRIERS) {
-      if ((w.role !== "all" && w.role !== b.br) || !overlapXY(nx, ny, w)) continue;
-      if (axis === "x") nx = d > 0 ? w.x0 - H : w.x1 + H;
-      else ny = d > 0 ? w.y0 - H : w.y1 + H;
-    }
-  }
   const m = MAPS[mapAt(b.x)];
   b.x = clamp(nx, m.x0 + H, m.x1 - H);
   b.y = clamp(ny, m.y0 + H, m.y1 - H);
@@ -204,7 +193,6 @@ export function withCrouch(b: Body, on: boolean, now: number): Body {
 export function roundBody(b: Body): Body {
   const r = (v: number) => Math.round(v * 1000) / 1000;
   const out: Body = { x: r(b.x), y: r(b.y), z: r(b.z), vz: r(b.vz), a: b.a, g: b.g, t: b.t };
-  if (b.bu !== undefined && b.t < b.bu) { out.bu = b.bu; out.br = b.br; } // 결계가 끝났으면 뺀다
   if (b.v !== undefined) out.v = b.v;
   if (b.k) out.k = true;
   return out;

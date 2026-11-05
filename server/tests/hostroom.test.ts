@@ -82,7 +82,7 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     a.push({ t: "start_practice" }); await tick(5);
     b.push({ t: "set_class", cls: "ARCHER" }); await tick(5);
     a.push({ t: "debug_phase", phase: "COUNTDOWN" }); await tick(5);
-    a.push({ t: "debug_phase", phase: "ATTACK" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "PLAY" }); await tick(5);
     // y=2 줄은 x 10~22가 빈 곳. 궁수는 (10,2)에서 동쪽으로, 적은 화살 길 위 7m 앞에 세운다
     b.push({ t: "debug_teleport", x: 10, y: 2 }); await tick(5);
     const arrow = makeArrow(makeBody(10, 2, 0), 0, 0.1, 0);
@@ -105,10 +105,10 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     await tick();
     a.push({ t: "join", nickname: "A" }); b.push({ t: "join", nickname: "B" });
     await tick(5);
-    a.push({ t: "debug_phase", phase: "ROUND_END" });
+    a.push({ t: "debug_phase", phase: "COUNTDOWN" });
     await tick(5);
-    expect(last(a, "room_state").phase).toBe("ROUND_END");
-    // ROUND_END 5초 → 다음 라운드 (알람). 테스트를 빨리 하려고 단계 종료 시각을 직접 기다리지 않고 확인만
+    expect(last(a, "room_state").phase).toBe("COUNTDOWN");
+    // COUNTDOWN 5초 → 경기 (알람). 테스트를 빨리 하려고 단계 종료 시각을 직접 기다리지 않고 확인만
     const endsAt = last(a, "room_state").phaseEndsAt;
     expect(endsAt - Date.now()).toBeGreaterThan(4000);
     // 손님 연결 끊김 → 재접속 대기
@@ -137,7 +137,7 @@ describe("순서 없이 도착하는 이동 (기기 직접 연결의 빠른 통�
     await tick();
     a.push({ t: "join", nickname: "A" });
     await tick(5);
-    a.push({ t: "debug_phase", phase: "ATTACK" });
+    a.push({ t: "debug_phase", phase: "PLAY" });
     await tick(5);
     a.push({ t: "move", a: 8, s: 5 });
     a.push({ t: "move", a: 3, s: 4 }); // 늦게 도착한 옛 입력

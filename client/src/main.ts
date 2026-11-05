@@ -1,15 +1,14 @@
 // 게임 진입점: 입장 → 로비 → 게임 화면 (이동/점프/타격/집 작업/치유/관전) → 라운드/경기 종료
 import { type Body, angleToRad, groundHeightAt, makeBody, radToAngle, simulate, withAngle, withCrouch, withJump } from "../../shared/sim";
-import { HOUSES, MAPS, PHYS, SITES, SPAWNS, type SiteId, type TeamId, isNearHouse, isNearSite } from "../../shared/world";
+import { SPAWNS, type TeamId } from "../../shared/world";
 import { Minimap } from "./minimap";
 import { setHighQuality } from "./graphics";
-import { ObjectiveMarkers, damageDirection, damageNumber, feed, hitMarker } from "./hudfx";
-import { AIM, findAimTarget, inReach } from "../../shared/aim";
+import { damageDirection, damageNumber, feed, hitMarker } from "./hudfx";
+import { findAimTarget } from "../../shared/aim";
 // 서버와 같은 메시지 형식/규칙 수치를 그대로 쓴다 (타입은 빌드 때 지워진다)
-import type { Phase, PublicPlayer, RoomStateMessage, RoundEndReason, ServerMessage, WorkInfo } from "../../server/src/protocol";
-import { BREAK_TIME_MS, REPAIR_TIME_MS, REVIVE_TIME_MS } from "../../server/src/constants";
+import type { Phase, PublicPlayer, RoomStateMessage, ServerMessage } from "../../server/src/protocol";
 import { canStartMatch } from "../../server/src/phase";
-import { CLASSES } from "../../shared/classes";
+import { CLASSES, KILL_TARGET } from "../../shared/classes";
 import { CONFIG } from "./config";
 import { Input } from "./input";
 import { Net } from "./net";
@@ -30,7 +29,6 @@ const SERVER_URL: string =
 const OFFLINE = import.meta.env.VITE_OFFLINE === "1" || new URLSearchParams(location.search).has("offline");
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-const other = (t: TeamId): TeamId => (t === "A" ? "B" : "A");
 
 /** 화면에 그리는 플레이어 */
 interface Actor {
@@ -49,7 +47,7 @@ interface Actor {
 }
 
 const world = new World3D($("stage"));
-const input = new Input($("touch"), $("stickBase"), $("stickKnob"), { jump: $("jumpBtn"), attack: $("attackBtn"), action: $("actionBtn"), crouch: $("crouchBtn") });
+const input = new Input($("touch"), $("stickBase"), $("stickKnob"), { jump: $("jumpBtn"), attack: $("attackBtn"), crouch: $("crouchBtn") });
 const net = new Net(SERVER_URL);
 
 let myId: string | null = null;
@@ -60,7 +58,6 @@ let matchCloseAt: number | null = null;
 let matchCloseTimer = 0;
 let roomCode = "";
 let room: RoomStateMessage | null = null;
-let work: WorkInfo | null = null;
 const actors = new Map<string, Actor>();
 
 // 입력 전송 상태
@@ -72,18 +69,6 @@ let lastMoveSendAt = 0;
 let prevWant = -2;
 let wantChangedAt = 0;
 /** 지금 누르고 있는 행동 (버튼을 뗄 때 같은 종류의 stop을 보낸다) */
-let activeAction: "hold" | "revive" | null = null;
-/** 행동 버튼을 누른 서버 시각 (서버 확인 전까지 진행률을 미리 채우는 데 사용) */
-let actionPressedAt = 0;
-/** 서버가 거절했으면 손을 뗄 때까지 다시 시도하지 않는다 */
-let actionLatched = false;
-/** 이번에 누른 행동을 서버가 한 번이라도 확인했는지 (확인 뒤에는 서버 값만 쓴다) */
-let actionAcked = false;
-
-/** 서버 확인 전 잠깐 동안만 미리 채운다 */
-function predicting(now: number): boolean {
-  return !actionAcked && myNormal() && movable() && now - actionPressedAt < CONFIG.ACTION_PREDICT_MS;
-}
 let localAttackAt = -Infinity;
 /** 핑 측정용: 입력 순번별로 보낸 시각, 타격 보낸 시각 */
 const sentAt = new Map<number, number>();
@@ -96,15 +81,11 @@ let route = "";
 let attackBufferedUntil = -Infinity;
 
 const tokenKey = () => `token:${roomCode}`;
-const movable = () => room?.phase === "ATTACK" || room?.phase === "REPAIR";
-/** 걸을 수 있는지: 전투 단계 + NEON 준비 시간(결계 안에서 이동) */
-const canWalk = () => movable() || (room?.phase === "COUNTDOWN" && room.map === "NEON");
-const SITE_IDS: SiteId[] = ["A", "B"];
+const movable = () => room?.phase === "PLAY";
+const canWalk = movable;
 const me = () => (myId ? actors.get(myId) : undefined);
 const myInfo = () => me()?.info;
 const myNormal = () => myInfo()?.combat.state === "NORMAL";
-/** 작업 중이거나 치유 중인지 (서버 상태 + 방금 누른 것) */
-const myBusy = () => activeAction !== null || !!(myId && work?.holders.includes(myId)) || !!myInfo()?.combat.revive;
 const inGame = () => !!room && room.phase !== "LOBBY";
 /** 이 플레이어의 직업 수치 */
 const classOf = (p?: PublicPlayer) => CLASSES[p?.cls ?? "KNIGHT"];
@@ -189,8 +170,6 @@ function goToJoin(message: string) {
   clearTimeout(matchCloseTimer);
   myId = null;
   room = null;
-  work = null;
-  activeAction = null;
   for (const a of actors.values()) a.view.dispose(world.scene);
   actors.clear();
   $("reconnecting").classList.add("hidden");
@@ -218,7 +197,8 @@ $("giveUpBtn").onclick = () => goToJoin("");
 // 고화질 그래픽 (기본: 컴퓨터 켬, 폰·패드 끔. 기기에 저장)
 const gfx = $<HTMLInputElement>("gfxToggle");
 gfx.checked = world.light.high;
-gfx.onchange = () => { setHighQuality(gfx.checked); world.light.setQuality(gfx.checked); };
+// 체크 표시가 먼저 그려진 뒤(두 프레임 뒤)에 바꾼다: 셰이더를 만드는 동안 체크박스가 늦게 바뀌어 보이지 않게
+gfx.onchange = () => { setHighQuality(gfx.checked); requestAnimationFrame(() => requestAnimationFrame(() => world.light.setQuality(gfx.checked))); };
 // 혼자 연습: 빈자리를 더미로 채우기 / 빼기 / 인원이 모자라도 바로 시작
 $("addBotsBtn").onclick = () => net.send({ t: "add_bots" });
 $("removeBotsBtn").onclick = () => net.send({ t: "remove_bots" });
@@ -283,15 +263,8 @@ if (import.meta.env.DEV && !OFFLINE) {
     b.onclick = fn;
     dbg.appendChild(b);
   };
-  for (const ph of ["LOBBY", "COUNTDOWN", "ATTACK", "REPAIR", "ROUND_END"]) add(ph, () => net.send({ t: "debug_phase", phase: ph }));
-  add("집 앞", () => {
-    if (!room) return;
-    if (room.map === "NEON") { const b = SITES.A; net.send({ t: "debug_teleport", x: b.x0 - 0.9, y: (b.y0 + b.y1) / 2 }); return; }
-    const h = HOUSES[other(room.attackingTeam)];
-    const side = h.x < PHYS.MAP_X / 2 ? 1 : -1; // 집의 맵 가운데 쪽 벽 앞
-    net.send({ t: "debug_teleport", x: h.x + side * (h.size / 2 + 0.6), y: h.y });
-  });
-  add("5:4", () => net.send({ t: "debug_score", A: 5, B: 4 }));
+  for (const ph of ["LOBBY", "COUNTDOWN", "PLAY", "MATCH_END"]) add(ph, () => net.send({ t: "debug_phase", phase: ph }));
+  add("14:3", () => net.send({ t: "debug_score", A: 14, B: 3 }));
 }
 
 // ---------- 네트워크 ----------
@@ -323,7 +296,6 @@ net.onMessage = (m) => {
       try { sessionStorage.setItem(tokenKey(), m.token); } catch { /* 무시 */ }
       net.autoReconnect = true; // 이제부터 끊기면 자동 재접속
       lastSentA = -2; // 접속 직후 현재 입력을 다시 보낸다
-      activeAction = null;
       $("join").classList.add("hidden");
       $("reconnecting").classList.add("hidden");
       if (m.resumed) toast("다시 연결됐어요");
@@ -333,10 +305,6 @@ net.onMessage = (m) => {
       break;
     case "move":
       onMove(m.id, m.body, m.s);
-      break;
-    case "work":
-      work = m.work;
-      if (room) room.sites = m.sites;
       break;
     case "swing":
       onSwing(m.by, m.target);
@@ -375,19 +343,12 @@ function onServerError(code: string, message: string) {
     case "cannot_attack":
       if (!message.includes("쿨다운")) toast(message);
       break;
-    case "cannot_work":
-    case "cannot_revive":
-      // 미리 보여 주던 진행률을 되돌리고, 손을 뗄 때까지 다시 시도하지 않는다
-      activeAction = null;
-      actionLatched = true;
-      toast(message);
-      break;
     default:
       toast(message);
   }
 }
 
-/** 기절·사망·부활 알림 (같은 라운드 안에서 상태가 바뀐 사람) */
+/** 처치 알림: "누가 → 누구" (죽은 순간만) */
 function announceStates(prev: RoomStateMessage, next: RoomStateMessage) {
   const name = (id?: string) => {
     const p = next.players.find((x) => x.id === id);
@@ -395,32 +356,22 @@ function announceStates(prev: RoomStateMessage, next: RoomStateMessage) {
   };
   for (const p of next.players) {
     const before = prev.players.find((x) => x.id === p.id)?.combat.state;
-    const now = p.combat.state;
-    if (before === now || !before) continue;
-    if (now === "DOWNED") feed($("feed"), `${name(lastHitBy.get(p.id))} → ${name(p.id)} 기절`, "down");
-    else if (now === "DEAD") feed($("feed"), `${name(p.id)} 사망`, "dead");
-    else if (before === "DOWNED" && now === "NORMAL") feed($("feed"), `${name(p.id)} 부활`, "up");
+    if (before === "NORMAL" && p.combat.state === "DEAD") feed($("feed"), `${name(lastHitBy.get(p.id))} → ${name(p.id)}`, "dead");
   }
 }
 
 let prevPhase: Phase | null = null;
-let lastRoundKey = "";
+/** 상대 진영 쪽(A팀 = 동쪽, B팀 = 서쪽)으로 카메라를 돌린다 */
+const faceEnemySide = (team: TeamId) => { world.yaw = team === "A" ? 0 : Math.PI; world.pitch = CONFIG.CAMERA_PITCH_DEFAULT; };
 function applyRoomState(s: RoomStateMessage) {
   const prevMe = myInfo();
-  if (room && room.round === s.round) announceStates(room, s);
-  // 단계/라운드가 바뀌었거나 내 상태(기절 등)가 바뀌었으면 서버 위치를 꼭 따른다
-  const forceMe = !room || s.phase !== room.phase || s.round !== room.round;
-  room = s;
-  work = s.work;
+  if (room) announceStates(room, s);
+  // 단계가 바뀌었거나 내 상태(사망 등)가 바뀌었으면 서버 위치를 꼭 따른다
+  const forceMe = !room || s.phase !== room.phase;
   const myTeam = s.players.find((p) => p.id === myId)?.team;
-  // 라운드 시작(준비 단계) 때 카메라를 상대 진영 쪽으로 돌린다
-  const roundKey = `${s.round}:${myTeam}:${s.phase === "COUNTDOWN" || s.phase === "LOBBY"}`;
-  if (myTeam && (s.phase === "COUNTDOWN" || s.phase === "LOBBY") && roundKey !== lastRoundKey) {
-    // NEON은 역할 기준 (공격 스폰 = 서쪽 → 동쪽을 봄, 수비 스폰 = 동쪽 → 서쪽을 봄)
-    world.yaw = s.map === "NEON" ? (myTeam === s.attackingTeam ? 0 : Math.PI) : myTeam === "A" ? 0 : Math.PI;
-    world.pitch = CONFIG.CAMERA_PITCH_DEFAULT;
-  }
-  lastRoundKey = roundKey;
+  // 경기 시작 전(로비·준비)에 상대 진영 쪽을 보게
+  if (myTeam && (s.phase === "COUNTDOWN" || s.phase === "LOBBY") && (room?.phase !== s.phase || !room)) faceEnemySide(myTeam);
+  room = s;
 
   // 사라진 플레이어 정리
   for (const [id, a] of actors) {
@@ -443,13 +394,13 @@ function applyRoomState(s: RoomStateMessage) {
     // (아직 서버에 안 간 내 입력이 있으면 덮어쓰지 않는다 — 곧 오는 move 응답으로 맞춘다)
   }
 
-  // 진동: 내가 맞았을 때 / 기절했을 때
+  // 진동: 내가 맞았을 때 / 죽었을 때. 부활하면 상대 진영 쪽을 보게
   const now = myInfo();
-  if (prevMe && now && s.phase !== "COUNTDOWN") {
-    if (now.combat.state === "DOWNED" && prevMe.combat.state === "NORMAL") vibrate(CONFIG.VIBRATE_DOWN);
+  if (prevMe && now && s.phase === "PLAY") {
+    if (now.combat.state === "DEAD" && prevMe.combat.state === "NORMAL") vibrate(CONFIG.VIBRATE_DOWN);
     else if (now.combat.hp < prevMe.combat.hp) vibrate(CONFIG.VIBRATE_HIT);
+    if (now.combat.state === "NORMAL" && prevMe.combat.state === "DEAD") faceEnemySide(now.team);
   }
-  // 내 작업/치유가 서버에서 끝났으면(기절, 단계 종료 등) 표시만 정리. 버튼을 뗄 때 stop은 그대로 보낸다
   if (s.phase !== prevPhase) {
     keepScreenOn(s.phase !== "LOBBY" && s.phase !== "MATCH_END");
     if (s.phase === "MATCH_END" || s.phase === "LOBBY") toggleScoreboard(false);
@@ -488,7 +439,7 @@ function onShot(m: Extract<ServerMessage, { t: "shot" }>) {
   world.addArrow(m.by, m.origin, m.dir, m.at, m.speed, m.range, actors.get(m.by)?.info.cls === "JAVELIN");
 }
 
-/** 마지막으로 그 사람을 때린 사람 (기절 알림용) */
+/** 마지막으로 그 사람을 때린 사람 (처치 알림용) */
 const lastHitBy = new Map<string, string>();
 
 function onSwing(by: string, target: string | null) {
@@ -529,7 +480,7 @@ function desiredAngle(): number {
 
 /** 내 캐릭터가 지금 실제로 움직일 수 있는 방향 (불가능하면 -1) */
 function effectiveAngle(): number {
-  return canWalk() && myNormal() && !myBusy() ? desiredAngle() : -1;
+  return canWalk() && myNormal() ? desiredAngle() : -1;
 }
 
 /** 서버 상태를 받아 현재 시각까지 진행하고, 화면 위치가 튀지 않게 오차를 off에 넣는다 */
@@ -548,47 +499,9 @@ function reconcile(a: Actor, body: Body, isMe: boolean) {
   a.body = nb;
 }
 
-// ---------- 행동 버튼: 상황에 따라 치유 > 부수기/수리 ----------
-type ActionKind = "revive" | "break" | "repair";
-function availableAction(): ActionKind | null {
-  const m = me();
-  if (!room || !m || !movable() || !myNormal()) return null;
-  // 근처에 기절한 팀원이 있으면 치유 우선
-  for (const a of actors.values()) {
-    if (a.id !== m.id && a.team === m.team && a.info.combat.state === "DOWNED" &&
-        inReach(m.body, a.body, AIM.REVIVE_RANGE, AIM.REVIVE_MAX_HEIGHT_DIFF)) return "revive";
-  }
-  const target = other(room.attackingTeam); // 부수기/수리 대상 = 수비팀 집 (NEON은 A/B 사이트 건물)
-  const near = room.map === "NEON"
-    ? SITE_IDS.some((s) => !!room!.sites?.[s].kind && isNearSite(s, m.body.x, m.body.y, m.body.z))
-    : isNearHouse(target, m.body.x, m.body.y, m.body.z);
-  if (!near) return null;
-  const attacker = m.team === room.attackingTeam;
-  if (room.phase === "ATTACK" && attacker) return "break";
-  if (room.phase === "REPAIR" && !attacker) return "repair";
-  return null;
-}
-
-function handleAction() {
-  if (actionLatched) {
-    if (!input.actionHeld) actionLatched = false;
-    return;
-  }
-  if (input.actionHeld && activeAction === null) {
-    const act = availableAction();
-    if (act === "revive") { net.send({ t: "revive_start" }); activeAction = "revive"; }
-    else if (act) { net.send({ t: "hold_start" }); activeAction = "hold"; }
-    if (act) { actionPressedAt = net.serverNow(); actionAcked = false; }
-  } else if (!input.actionHeld && activeAction !== null) {
-    net.send({ t: activeAction === "revive" ? "revive_stop" : "hold_stop" });
-    activeAction = null;
-  }
-}
-
 /** 하던 것을 모두 멈춘다 (앱이 백그라운드로 갈 때) */
 function stopEverything() {
   input.reset();
-  if (activeAction) { net.send({ t: activeAction === "revive" ? "revive_stop" : "hold_stop" }); activeAction = null; }
   if (lastSentA !== -1 && myId) { net.send({ t: "move", a: -1, s: ++seq }); lastSentSeq = seq; lastSentA = -1; }
 }
 
@@ -651,7 +564,7 @@ function renderLobby() {
 function renderScreens() {
   const game = !!myId && inGame();
   $("lobby").classList.toggle("hidden", !myId || inGame());
-  for (const id of ["hud", "scoreBtn", "teamPanelMine", "teamPanelEnemy"]) $(id).classList.toggle("hidden", !game);
+  for (const id of ["hud", "scoreBtn", "teamPanelMine"]) $(id).classList.toggle("hidden", !game);
   $("fullscreenBtn").classList.toggle("hidden", !fullscreenSupported() || !myId);
   $("touch").classList.toggle("hidden", !game || room?.phase === "MATCH_END" || room?.phase === "CLASS_SELECT");
   renderClassSelect();
@@ -669,21 +582,11 @@ function renderClassSelect() {
 }
 
 const PHASE_NAME: Record<Phase, string> = {
-  LOBBY: "로비", CLASS_SELECT: "직업 선택", COUNTDOWN: "준비", ATTACK: "공격 단계", REPAIR: "수리 단계", ROUND_END: "라운드 종료", MATCH_END: "경기 종료",
-};
-const REASON_TEXT: Record<RoundEndReason, string> = {
-  break_timeout: "시간 안에 집을 부수지 못했어요",
-  repair_success: "집 수리 성공",
-  repair_fail: "집 수리 실패",
-  attackers_wiped: "공격팀 전멸",
-  defenders_wiped: "수비팀 전멸",
-  site_destroyed: "사이트 건물 파괴",
+  LOBBY: "로비", CLASS_SELECT: "직업 선택", COUNTDOWN: "준비", PLAY: "경기 중", MATCH_END: "경기 종료",
 };
 
-let historyLen = -1;
 function renderHud(now: number) {
   if (!room || !inGame()) return;
-  const mine = myInfo();
   if (OFFLINE) {
     setText("hudRound", "혼자 연습 모드");
     setText("hudTimer", "자유 이동");
@@ -691,89 +594,23 @@ function renderHud(now: number) {
   } else {
     const left = room.phaseEndsAt === null ? 0 : Math.max(0, Math.ceil((room.phaseEndsAt - now) / 1000));
     const mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, "0");
-    // 점수판 윗줄 한 줄: "라운드 2 · 공격 · 준비" (역할은 내 팀 기준, 단계 이름은 공격/수비와 헷갈리지 않게 짧게)
-    const atk = !!mine && mine.team === room.attackingTeam;
-    const step = room.phase === "COUNTDOWN" ? " · 준비" : room.phase === "REPAIR" ? " · 수리" : room.phase === "ROUND_END" ? " · 종료" : "";
-    setText("hudRound", room.phase === "ATTACK" || room.phase === "REPAIR" || room.phase === "COUNTDOWN" || room.phase === "ROUND_END"
-      ? `${room.practice ? "연습 · " : ""}라운드 ${room.round} · ${atk ? "공격" : "수비"}${step}`
-      : PHASE_NAME[room.phase]);
-    setText("hudTimer", room.phase === "MATCH_END" ? `${room.matchWinner ?? "-"}${room.matchWinner ? "팀 승리" : ""}` : room.phase === "COUNTDOWN" || room.phase === "ROUND_END" || room.phase === "CLASS_SELECT" ? `${left}` : `${mm}:${ss}`);
+    setText("hudRound", room.phase === "PLAY" || room.phase === "COUNTDOWN" ? `${room.practice ? "연습 · " : ""}먼저 ${KILL_TARGET}킬` : PHASE_NAME[room.phase]);
+    setText("hudTimer", room.phase === "MATCH_END" ? (room.matchWinner ? `${room.matchWinner}팀 승리` : "끝") : room.phase === "PLAY" ? `${mm}:${ss}` : `${left}`);
     if (room.phase === "CLASS_SELECT") setText("classLeft", String(left));
     $("hudTimer").classList.toggle("urgent", movable() && left <= CONFIG.TIMER_URGENT_S);
     const bad = !net.connected || net.unstable || net.rtt > CONFIG.PING_WARN_MS;
     setText("netStatus", net.connected ? `${bad ? "불안정 · " : ""}ping ${Math.round(net.rtt)}ms${route ? " · " + route : ""} · ${Math.round(fps)}fps` : "연결 끊김");
     $("netStatus").classList.toggle("bad", bad);
   }
-  // 점수, 매치포인트, 듀스, 라운드 기록
+  // 팀 킬 수
   setText("scoreA", String(room.score.A));
   setText("scoreB", String(room.score.B));
-  $("mpA").classList.toggle("hidden", !room.matchPoint.includes("A"));
-  $("mpB").classList.toggle("hidden", !room.matchPoint.includes("B"));
-  $("deuceBadge").classList.toggle("hidden", !room.deuce || room.phase === "MATCH_END");
-  if (room.history.length !== historyLen) {
-    historyLen = room.history.length;
-    $("history").replaceChildren(...room.history.map((h) => {
-      const i = document.createElement("i");
-      i.className = h.winner;
-      i.title = `라운드 ${h.round}: ${h.winner}팀 승 (${REASON_TEXT[h.reason]})`;
-      return i;
-    }));
-  }
-  // 집 작업 진행률 (서버가 준 값으로 부드럽게 채움, 체크포인트 표시)
-  const wb = $("workBar");
-  if (work && work.kind && movable()) {
-    const p = workProgress(now);
-    wb.classList.remove("hidden");
-    wb.classList.toggle("repair", work.kind === "REPAIR");
-    setText("workLabel", `${work.kind === "BREAK" ? "집 부수기" : "집 수리"} ${Math.floor(p * 100)}%${work.holders.length ? " · 작업 중" : ""}`);
-    $("workFill").style.width = `${p * 100}%`;
-    $("workCheckpoint").style.left = `${work.checkpoint * 100}%`;
-  } else wb.classList.add("hidden");
-  renderSiteBars(now);
   renderTeamPanels(now);
-}
-
-/** NEON: A/B 건물 체력 (= 100% - 부수기 진행률, 서버 값으로 부드럽게 계산) */
-function renderSiteBars(now: number) {
-  const box = $("siteBars");
-  const sites = room?.map === "NEON" ? room.sites : null;
-  box.classList.toggle("hidden", !sites || room?.phase === "MATCH_END");
-  if (!sites) return;
-  for (const id of SITE_IDS) {
-    const w = sites[id];
-    const p = Math.min(1, w.progress + Math.max(0, now - w.since) * w.rate);
-    const repairing = w.kind === "REPAIR"; // 수리 단계: 수리 진행률이 곧 체력
-    const hp = Math.max(0, Math.round((repairing ? p : 1 - p) * 100));
-    $(`siteFill${id}`).style.width = `${hp}%`;
-    setText(`siteHp${id}`, repairing ? `수리 ${hp}%` : hp === 0 ? "파괴" : `${hp}%`);
-    const el = box.querySelector(`.site.${id}`)!;
-    el.classList.toggle("hit", w.holders.length > 0);
-    el.classList.toggle("dead", hp === 0);
-  }
-}
-
-/** 화면 위 목표 표시: NEON = A/B 건물(수리 단계는 부서진 건물만), 기본 맵 = 부술/지킬 집 */
-const objectives = new ObjectiveMarkers($("objectives"));
-function renderObjectives() {
-  const show = !!room && (room.phase === "COUNTDOWN" || room.phase === "ATTACK" || room.phase === "REPAIR") && myNormal();
-  const list = [];
-  if (show && room!.map === "NEON" && room!.sites) {
-    for (const id of SITE_IDS) {
-      const w = room!.sites[id], b = SITES[id];
-      if (room!.phase === "REPAIR" && w.kind !== "REPAIR") continue;
-      list.push({ key: id, label: id, x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2, z: b.z1 + 1.2, color: id === "A" ? "#ffb02e" : "#2ee6ff", active: w.holders.length > 0 });
-    }
-  } else if (show) {
-    const t = other(room!.attackingTeam), h = HOUSES[t];
-    list.push({ key: "house", label: `${t}팀 집`, x: h.x, y: h.y, z: h.height + 1.5, color: t === "A" ? "#ff8a8a" : "#8ab0ff", active: !!work?.holders.length });
-  }
-  const m = me();
-  objectives.update(world.camera, list, m ? m.body : null);
 }
 
 /** 미니맵: 우리 팀 위치·방향만 (상대 위치는 숨김) */
 const minimap = new Minimap($<HTMLCanvasElement>("minimap"));
-function renderMinimap(now: number) {
+function renderMinimap() {
   const mine = myInfo();
   const show = !!room && !!mine && inGame() && room.phase !== "MATCH_END";
   $("minimap").classList.toggle("hidden", !show);
@@ -781,16 +618,16 @@ function renderMinimap(now: number) {
   const dots = [...actors.values()].filter((a) => a.team === mine!.team).map((a) => ({
     x: a.body.x, y: a.body.y, face: a.id === myId ? world.yaw : a.face, team: a.team, me: a.id === myId,
   }));
-  minimap.draw(room!.map ?? "CLASSIC", dots, room!.barrierUntil !== null && now < room!.barrierUntil);
+  minimap.draw(room!.map ?? "CLASSIC", dots);
 }
 
-/** 왼쪽 위 = 우리 팀, 오른쪽 위 = 상대 팀 체력 */
+/** 왼쪽 위 = 우리 팀 체력만 (상대 체력은 보일 때 머리 위에만) */
 let panelKey = "";
 function renderTeamPanels(now: number) {
   const mine = myInfo();
   if (!room || !mine) return;
   const parts: string[] = [];
-  for (const p of room.players) parts.push(`${p.id}:${p.team}:${p.combat.hp}:${p.combat.state}:${p.conn}:${p.combat.deathAt ? Math.ceil((p.combat.deathAt - now) / 1000) : ""}`);
+  for (const p of room.players) if (p.team === mine.team) parts.push(`${p.id}:${p.combat.hp}:${p.combat.state}:${p.conn}:${statusText(p, now)}`);
   const key = parts.join("|");
   if (key === panelKey) return; // 바뀐 게 없으면 다시 그리지 않는다
   panelKey = key;
@@ -804,152 +641,71 @@ function renderTeamPanels(now: number) {
     return d;
   };
   $("teamPanelMine").replaceChildren(...room.players.filter((p) => p.team === mine.team).map(row));
-  $("teamPanelEnemy").replaceChildren(...room.players.filter((p) => p.team !== mine.team).map(row));
 }
 
 function statusText(p: PublicPlayer, now: number): string {
   if (p.conn === "RECONNECTING") return "재접속 중";
-  if (p.combat.state === "DEAD") return "사망";
-  if (p.combat.state === "DOWNED") {
-    // 라운드가 끝나면 사망 타이머도 멈추므로 카운트다운 대신 "기절"만 표시
-    if (!movable() || p.combat.deathAt === null) return "기절";
-    return `기절 ${Math.max(0, Math.ceil((p.combat.deathAt - now) / 1000))}초`;
-  }
-  if (p.combat.revive) return "치유 중";
+  if (p.combat.state === "DEAD") return p.combat.respawnAt && movable() ? `부활 ${Math.max(0, Math.ceil((p.combat.respawnAt - now) / 1000))}초` : "사망";
   if (now < (p.combat.stealthUntil ?? 0)) return `은신 ${Math.ceil((p.combat.stealthUntil! - now) / 1000)}초`;
   if (p.id === myId && now < (p.combat.stealthReadyAt ?? 0)) return `은신 대기 ${Math.ceil((p.combat.stealthReadyAt! - now) / 1000)}초`;
-  if (work?.holders.includes(p.id)) return "작업 중";
   return "";
 }
 
 function renderScoreboard() {
   if (!room) return;
   const now = net.serverNow();
-  const rows = [...room.players].sort((a, b) => a.team.localeCompare(b.team)).map((p) => {
+  const rows = [...room.players].sort((a, b) => a.team.localeCompare(b.team) || b.combat.kills - a.combat.kills).map((p) => {
     const tr = document.createElement("tr");
     tr.className = p.team + (p.id === myId ? " me" : "");
-    const cells = [`${p.team}팀`, p.id === myId ? `${p.nickname} (나)` : p.nickname, String(p.combat.hp), String(p.combat.downs), String(p.combat.deaths), statusText(p, now) || "정상"];
+    const cells = [`${p.team}팀`, p.id === myId ? `${p.nickname} (나)` : p.nickname, String(p.combat.kills), String(p.combat.deaths), statusText(p, now) || "생존"];
     for (const c of cells) { const td = document.createElement("td"); td.textContent = c; tr.appendChild(td); }
     return tr;
   });
   $("scoreboardBody").replaceChildren(...rows);
 }
 
-/** 라운드 종료 배너, 경기 종료 화면 */
+/** 경기 종료 화면 */
 function renderEndScreens() {
-  const banner = $("roundBanner");
   const mine = myInfo();
-  if (room?.phase === "ROUND_END") {
-    banner.classList.remove("hidden", "A", "B");
-    if (room.roundEnd && mine) {
-      const won = room.roundEnd.winner === mine.team;
-      banner.classList.add(room.roundEnd.winner);
-      banner.innerHTML = `${won ? "라운드 승리!" : "라운드 패배"}<small></small>`;
-      const why = room.roundEnd.site ? `${room.roundEnd.site} 사이트 건물 파괴` : REASON_TEXT[room.roundEnd.reason];
-      (banner.querySelector("small") as HTMLElement).textContent = `${room.roundEnd.winner}팀 +1 · ${why} · ${room.score.A} : ${room.score.B}`;
-    } else banner.textContent = "라운드 종료";
-  } else banner.classList.add("hidden");
-
   const end = $("matchEnd");
   if (room?.phase === "MATCH_END" && mine) {
     end.classList.remove("hidden");
-    if (room.matchEndReason === "player_left") {
+    const r = room.matchEndReason;
+    if (r === "player_left") {
       setText("matchTitle", "경기 종료");
       setText("matchSub", "플레이어가 나가서 경기가 끝났어요. 다시 하기를 누르면 로비로 돌아가요.");
     } else {
-      const won = room.matchWinner === mine.team;
-      setText("matchTitle", won ? `${mine.team}팀 승리` : `${room.matchWinner}팀 승리`);
-      setText("matchSub", won ? "축하해요! 다시 하기를 누르면 로비로 돌아가요." : "아쉬워요. 다시 하기를 누르면 로비로 돌아가요.");
+      const w = room.matchWinner;
+      setText("matchTitle", !w ? "무승부" : w === mine.team ? "승리" : "패배");
+      setText("matchSub", r === "score" ? `${w}팀이 먼저 ${KILL_TARGET}킬` : "10분이 끝났어요");
     }
     setText("matchScore", `A ${room.score.A} : ${room.score.B} B`);
   } else end.classList.add("hidden");
 }
 
-/**
- * 지금 집 작업 진행률 (0~1). 서버 값으로 계산하되, 내가 방금 눌렀는데 아직 서버가 확인하지 않았으면
- * 누른 시각부터 혼자 작업 속도로 미리 채운다 (서버 대답이 오면 서버 값으로 바뀐다).
- */
-function workProgress(now: number): number {
-  if (!work || !work.kind) return 0;
-  const server = Math.min(1, work.progress + Math.max(0, now - work.since) * work.rate);
-  const confirmed = !!myId && work.holders.includes(myId);
-  if (confirmed) actionAcked = true;
-  if (activeAction !== "hold" || confirmed || work.holders.length > 0 || !predicting(now)) return server;
-  const ms = work.kind === "BREAK" ? BREAK_TIME_MS : REPAIR_TIME_MS;
-  return Math.min(1, work.progress + Math.max(0, now - actionPressedAt) / ms);
-}
-
-/** 오른쪽 아래 버튼들 (타격 쿨다운, 행동 라벨/진행률 링) */
-const RING = 289; // 2πr (r=46)
+/** 오른쪽 아래 버튼: 타격 쿨다운 */
 function renderButtons(now: number) {
   const mine = myInfo();
   if (!mine) return;
-  const touch = $("touch");
-  const spectating = inGame() && mine.combat.state !== "NORMAL";
-  touch.classList.toggle("spectate", spectating);
-
-  // 타격: 쿨다운 동안 어둡게 + 남은 시간
+  $("touch").classList.toggle("spectate", inGame() && mine.combat.state !== "NORMAL");
   const cooldown = classOf(mine).cooldownMs;
   const readyAt = Math.max(mine.combat.attackReadyAt, localAttackAt + cooldown);
   const cd = Math.max(0, readyAt - now);
   $("attackBtn").classList.toggle("cooling", cd > 0 || !movable());
   setText("attackLabel", cd > 0 ? (cd / 1000).toFixed(1) : mine.cls === "JAVELIN" ? "던지기" : mine.cls === "GOBLIN" ? "찌르기" : classOf(mine).ranged ? "쏘기" : "타격");
   $("attackCd").style.height = `${(cd / cooldown) * 100}%`;
-
-  // 행동: 하고 있는 것 > 할 수 있는 것 > 비활성
-  const btn = $("actionBtn");
-  let label = "행동", cls = "disabled", progress = 0;
-  if (activeAction === "revive" || mine.combat.revive) {
-    label = "치유 중"; cls = "revive";
-    const r = mine.combat.revive;
-    // 서버 확인 전에는 누른 시각부터 미리 채운다
-    if (r) actionAcked = true;
-    progress = r ? 1 - Math.max(0, r.endsAt - now) / REVIVE_TIME_MS
-      : predicting(now) ? Math.min(1, Math.max(0, now - actionPressedAt) / REVIVE_TIME_MS) : 0;
-  } else if (activeAction === "hold" || (myId && work?.holders.includes(myId))) {
-    label = work?.kind === "REPAIR" ? "수리 중" : "부수는 중"; cls = "";
-    progress = workProgress(now);
-  } else {
-    const act = availableAction();
-    if (act === "revive") { label = "치유"; cls = "revive"; }
-    else if (act === "break") { label = "부수기"; cls = ""; }
-    else if (act === "repair") { label = "수리"; cls = ""; }
-  }
-  setText("actionLabel", label);
-  btn.classList.toggle("disabled", cls === "disabled");
-  btn.classList.toggle("revive", cls === "revive");
-  $("actionRing").style.strokeDashoffset = String(RING * (1 - progress));
 }
 
-/** 기절/사망 시 큰 카운트다운과 관전 안내 */
-function renderDownOverlay(now: number, watching: Actor | undefined) {
+/** 죽었을 때: 부활까지 남은 초 + 누구에게 당했는지 */
+function renderDownOverlay(now: number) {
   const mine = myInfo();
   const el = $("downOverlay");
   if (!mine || !movable() || mine.combat.state === "NORMAL") { el.classList.add("hidden"); return; }
   el.classList.remove("hidden");
-  const who = watching && watching.id !== myId ? `관전 중: ${watching.info.nickname}` : "";
-  if (mine.combat.state === "DOWNED") {
-    setText("downTitle", "기절!");
-    setText("downCount", String(Math.max(0, Math.ceil(((mine.combat.deathAt ?? now) - now) / 1000))));
-    setText("downHint", `팀원이 3초 동안 치유해 주면 살아나요 ${who ? "· " + who : ""}`);
-  } else {
-    setText("downTitle", "사망");
-    setText("downCount", "");
-    setText("downHint", `이번 라운드가 끝날 때까지 기다려요 ${who ? "· " + who : ""}`);
-  }
-}
-
-/** 기절/사망하면 살아있는 팀원 시점으로 */
-function spectateTarget(): Actor | undefined {
-  const m = me();
-  if (!m || m.info.combat.state === "NORMAL" || !movable()) return m;
-  let fallback: Actor | undefined;
-  for (const a of actors.values()) {
-    if (a.id === m.id || a.team !== m.team) continue;
-    if (a.info.combat.state === "NORMAL") return a;
-    fallback = a;
-  }
-  return fallback ?? m;
+  const by = actors.get(lastHitBy.get(mine.id) ?? "")?.info.nickname;
+  setText("downTitle", "처치당했어요");
+  setText("downCount", String(Math.max(0, Math.ceil(((mine.combat.respawnAt ?? now) - now) / 1000))));
+  setText("downHint", by ? `${by}에게 · 곧 우리 팀 시작 위치에서 부활해요` : "곧 우리 팀 시작 위치에서 부활해요");
 }
 
 function setText(id: string, t: string) { const el = $(id); if (el.textContent !== t) el.textContent = t; }
@@ -1003,14 +759,12 @@ function frame() {
       lastSentA = want;
       lastMoveSendAt = t;
     }
-    // 2) 행동 버튼 (누를 때 start, 뗄 때 stop 각 1번)
-    handleAction();
-    // 3) 내 캐릭터 예측: 입력을 즉시 반영
+    // 2) 내 캐릭터 예측: 입력을 즉시 반영
     const effA = effectiveAngle();
     m.body = simulate(m.body, now);
     if (m.body.a !== effA) m.body = withAngle(m.body, effA, now);
     // 4) 점프 (1회 = 메시지 1개)
-    if (input.consumeJump() && canWalk() && myNormal() && !myBusy()) {
+    if (input.consumeJump() && canWalk() && myNormal()) {
       const j = withJump(m.body, now);
       if (j) {
         m.body = j;
@@ -1028,15 +782,16 @@ function frame() {
       lastSentSeq = seq;
     }
     $("crouchBtn").classList.toggle("on", !!m.body.k);
-    // 5) 타격 (1회 = 메시지 1개). 판정은 서버가 같은 조준 광선으로 한다
+    // 5) 타격 (1회 = 메시지 1개). 원거리는 조준점(카메라) 방향, 근접은 캐릭터가 바라보는 방향으로. 판정은 서버가 같은 방향으로 한다
     if (input.consumeAttack()) attackBufferedUntil = now + CONFIG.ATTACK_BUFFER_MS;
     if (now <= attackBufferedUntil) {
       const ranged = classOf(m.info).ranged;
       const readyAt = Math.max(m.info.combat.attackReadyAt, localAttackAt + classOf(m.info).cooldownMs);
-      if (movable() && myNormal() && !myBusy() && now >= readyAt) {
-        net.send({ t: "attack", yaw: world.yaw, pitch: world.pitch });
-        // 서버 판정을 기다리지 않고, 조준점에 걸린 상대를 바로 번쩍이게 한다 (체력은 서버 결과로 바뀜)
-        const predicted = ranged ? null : findAimTarget(m.body, world.yaw, world.pitch, enemyBuf); // 화살은 날아간 뒤 판정
+      if (movable() && myNormal() && now >= readyAt) {
+        const yaw = ranged ? world.yaw : m.face;
+        net.send({ t: "attack", yaw, pitch: world.pitch });
+        // 서버 판정을 기다리지 않고, 맞을 상대를 바로 번쩍이게 한다 (체력은 서버 결과로 바뀜)
+        const predicted = ranged ? null : findAimTarget(m.body, yaw, world.pitch, enemyBuf); // 화살은 날아간 뒤 판정
         if (predicted) { predicted.view.flash(t); predictedHit = predicted.id; }
         attackSentAt = t;
         localAttackAt = now;
@@ -1053,7 +808,7 @@ function frame() {
   // 6) 모든 캐릭터 진행 + 보정 오차 줄이기 + 그리기
   const decay = Math.exp((-dt * 1000) / CONFIG.CORRECTION_SMOOTH_MS);
   const w = window.innerWidth, h = window.innerHeight;
-  const watch = spectateTarget();
+  const watch = m;
   enemyBuf.length = 0;
   for (const [id, a] of actors) {
     if (id !== myId) a.body = simulate(a.body, now);
@@ -1064,12 +819,14 @@ function frame() {
     }
     const x = a.body.x + a.off.x, y = a.body.y + a.off.y, z = Math.max(0, a.body.z + a.off.z);
     const c = a.info.combat;
-    const state = c.state === "NORMAL" ? 0 : c.state === "DOWNED" ? 1 : 2;
-    a.view.activity = work?.holders.includes(id) || SITE_IDS.some((s) => room?.sites?.[s].holders.includes(id)) ? "work" : c.revive ? "revive" : null;
+    const state = c.state === "NORMAL" ? 0 : 2;
     // 은신: 상대 눈에는 안 보이고, 우리 팀(나 포함)에게는 반투명
     // shortcut: 숨기기는 화면에서만 (위치는 상대에게도 전송됨), 조작한 클라이언트를 막아야 하면 서버가 위치 전송을 거른다
     const stealth = state === 0 && now < (c.stealthUntil ?? 0);
-    a.view.hidden = stealth && !!m && a.team !== m.team;
+    const enemy = !!m && a.team !== m.team;
+    a.view.hidden = stealth && enemy;
+    // 상대 이름표·체력은 엄폐물에 가리지 않고 보일 때만
+    a.view.labelHidden = enemy && !world.canSee(x, y, z + 1.4);
     a.view.update(x, y, z, a.face, groundHeightAt(x, y, z), state, now < c.invulnUntil, a.info.conn === "RECONNECTING" || stealth, t, !!a.body.k);
     a.view.setStatus(c.hp / classOf(a.info).maxHp, inGame() ? statusText(a.info, now) : "");
     if (a === watch) {
@@ -1081,7 +838,6 @@ function frame() {
   }
   if (!watch) world.updateCamera(24, 14 - 8, 0); // 입장 전: 맵 가운데를 비춤
   world.updateArrows(now);
-  world.setBarriers(!!room && room.barrierUntil !== null && now < room.barrierUntil); // 서버 시각 기준으로 동시에 사라짐
   world.render();
   for (const a of actors.values()) a.view.placeLabel(world.camera, w, h);
 
@@ -1089,11 +845,10 @@ function frame() {
   const ch = $("crosshair");
   const showCh = !!m && movable() && myNormal();
   ch.classList.toggle("hidden", !showCh);
-  if (showCh) ch.classList.toggle("target", !classOf(m!.info).ranged && !!findAimTarget(m!.body, world.yaw, world.pitch, enemyBuf));
+  if (showCh) ch.classList.toggle("target", !classOf(m!.info).ranged && !!findAimTarget(m!.body, m!.face, world.pitch, enemyBuf)); // 근접: 바라보는 쪽에 맞을 상대가 있으면 빨갛게
 
   renderHud(now);
-  renderMinimap(now);
-  renderObjectives();
+  renderMinimap();
   renderButtons(now);
   // 경기 후 방이 닫히기까지 남은 시간
   const note = $("matchCloseNote");
@@ -1102,26 +857,25 @@ function frame() {
     setText("matchCloseNote", `⏱ 방이 ${left}초 뒤에 닫혀요. 다시 하기를 누르면 이 방에서 계속해요.`);
     note.classList.remove("hidden");
   } else note.classList.add("hidden");
-  renderDownOverlay(now, watch);
+  renderDownOverlay(now);
 }
 world.yaw = Math.PI / 2; // 입장 전 카메라는 북쪽을 바라봄
 
 // 혼자 연습 모드: 입장 화면 없이 A팀 시작 위치에서 바로 움직일 수 있는 상태로 시작
 if (OFFLINE) {
   myId = "me";
-  world.yaw = 0; // 동쪽(상대 팀 집 방향)을 바라보며 시작
+  world.yaw = 0; // 동쪽(상대 진영)을 바라보며 시작
   $("join").classList.add("hidden");
   const sp = SPAWNS.A[0]!;
   const t0 = net.serverNow();
   applyRoomState({
-    t: "room_state", room: "연습", phase: "ATTACK", round: 1, attackingTeam: "A", phaseEndsAt: null,
-    work: { kind: null, progress: 0, since: t0, holders: [], rate: 0, completesAt: null, checkpoint: 0.5 },
-    roundEnd: null, map: "CLASSIC", sites: null, barrierUntil: null, score: { A: 0, B: 0 }, history: [], matchPoint: [], deuce: false, matchWinner: null, matchEndReason: null, practice: true,
+    t: "room_state", room: "연습", phase: "PLAY", phaseEndsAt: null,
+    map: "CLASSIC", score: { A: 0, B: 0 }, matchWinner: null, matchEndReason: null, practice: true,
     serverTime: t0,
     players: [{
       id: "me", nickname: "연습", team: "A", conn: "CONNECTED", reconnectDeadline: null, ready: true,
       body: makeBody(sp.x, sp.y, t0), seq: 0,
-      combat: { hp: CLASSES.KNIGHT.maxHp, state: "NORMAL", deathAt: null, invulnUntil: 0, downs: 0, deaths: 0, revive: null, attackReadyAt: 0 },
+      combat: { hp: CLASSES.KNIGHT.maxHp, state: "NORMAL", respawnAt: null, invulnUntil: 0, kills: 0, deaths: 0, attackReadyAt: 0 },
       bot: false, cls: "KNIGHT", owner: true,
     }],
   });
@@ -1129,4 +883,4 @@ if (OFFLINE) {
 requestAnimationFrame(frame);
 
 // 개발 모드에서만: 자동 테스트/디버깅용으로 상태 노출
-if (import.meta.env.DEV) (window as any).__game = { actors, world, net, get myId() { return myId; }, get room() { return room; }, get work() { return work; } };
+if (import.meta.env.DEV) (window as any).__game = { actors, world, net, get myId() { return myId; }, get room() { return room; } };

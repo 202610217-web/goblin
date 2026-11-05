@@ -30,6 +30,9 @@ export const CLASSES: Record<ClassId, {
 /** 고블린 은신: 지속 10초, 끝난 뒤 15초 쿨타임. 뒤치기 배율 */
 export const STEALTH = { DURATION_MS: 10_000, COOLDOWN_MS: 15_000, BACKSTAB: 1.5 } as const;
 
+/** 데스매치: 먼저 이 킬 수에 닿은 팀이 승리 */
+export const KILL_TARGET = 15;
+
 /** 투사체 판정 간격 (서버가 50ms마다 지나간 구간을 본다) */
 export const ARROW = { STEP_MS: 50 } as const;
 

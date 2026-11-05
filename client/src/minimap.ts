@@ -1,6 +1,6 @@
-// 미니맵: 실제 충돌 데이터(BOXES_BY_MAP, BARRIERS, SITES)를 그대로 위에서 내려다본 그림. 북쪽이 위.
+// 미니맵: 실제 충돌 데이터(BOXES_BY_MAP)를 그대로 위에서 내려다본 그림. 북쪽이 위.
 import { NEON_REGIONS, NEON_ZONES } from "../../shared/neon";
-import { BARRIERS, BOXES_BY_MAP, type Box, MAPS, type MapId } from "../../shared/world";
+import { BOXES_BY_MAP, type Box, MAPS, type MapId } from "../../shared/world";
 
 const KIND_COLOR: Record<Box["kind"], string> = {
   building: "#3b4160", wall: "#8a90a2", hedge: "#2f7a3e", crate: "#a27a46", cargo: "#8a6438",
@@ -9,7 +9,6 @@ const KIND_COLOR: Record<Box["kind"], string> = {
 };
 const SITE_COLOR = { A: "#ffb02e", B: "#2ee6ff" } as const;
 const TEAM_COLOR = { A: "#ff6b6b", B: "#5f95ff" } as const;
-const BARRIER_COLOR = { all: "#ff3df0", atk: "#ff5a5a", def: "#4fa8ff" } as const;
 
 export interface MinimapDot { x: number; y: number; face: number; team: "A" | "B"; me: boolean }
 
@@ -35,8 +34,8 @@ export class Minimap {
       const zone = (r: { x0: number; y0: number; x1: number; y1: number }, fill: string) => { g.fillStyle = fill; this.rect(g, map, r); };
       zone(NEON_ZONES.siteA, "rgba(255,176,46,0.16)");
       zone(NEON_ZONES.siteB, "rgba(46,230,255,0.14)");
-      zone(NEON_ZONES.spawnAtk, "rgba(255,90,90,0.35)");
-      zone(NEON_ZONES.spawnDef, "rgba(79,168,255,0.35)");
+      zone(NEON_ZONES.spawnA, "rgba(255,90,90,0.35)");
+      zone(NEON_ZONES.spawnB, "rgba(79,168,255,0.35)");
     }
     for (const b of [...BOXES_BY_MAP[map]].sort((p, q) => p.z1 - q.z1)) {
       g.fillStyle = b.site ? SITE_COLOR[b.site] : b.kind === "house" && b.team ? TEAM_COLOR[b.team] : KIND_COLOR[b.kind];
@@ -52,8 +51,8 @@ export class Minimap {
       for (const b of BOXES_BY_MAP.NEON) if (b.site) { g.fillStyle = "#111"; g.fillText(b.site, ...this.px(map, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2)); }
       g.font = `bold ${Math.round(2.4 * this.k)}px sans-serif`;
       g.fillStyle = "#fff";
-      g.fillText("공격", ...this.px(map, (NEON_ZONES.spawnAtk.x0 + NEON_ZONES.spawnAtk.x1) / 2, (NEON_ZONES.spawnAtk.y0 + NEON_ZONES.spawnAtk.y1) / 2));
-      g.fillText("수비", ...this.px(map, (NEON_ZONES.spawnDef.x0 + NEON_ZONES.spawnDef.x1) / 2, (NEON_ZONES.spawnDef.y0 + NEON_ZONES.spawnDef.y1) / 2));
+      g.fillText("A팀", ...this.px(map, (NEON_ZONES.spawnA.x0 + NEON_ZONES.spawnA.x1) / 2, (NEON_ZONES.spawnA.y0 + NEON_ZONES.spawnA.y1) / 2));
+      g.fillText("B팀", ...this.px(map, (NEON_ZONES.spawnB.x0 + NEON_ZONES.spawnB.x1) / 2, (NEON_ZONES.spawnB.y0 + NEON_ZONES.spawnB.y1) / 2));
     }
   }
 
@@ -67,15 +66,12 @@ export class Minimap {
     g.fillRect(x, y, (r.x1 - r.x0) * this.k, (r.y1 - r.y0) * this.k);
   }
 
-  /** 매 프레임: 결계(작동 중이면)와 사람 위치·방향 */
-  draw(map: MapId, dots: MinimapDot[], barriers: boolean) {
+  /** 매 프레임: 우리 팀 위치·방향 */
+  draw(map: MapId, dots: MinimapDot[]) {
     const key = `${map}:${this.canvas.clientWidth}`;
     if (key !== this.key) { this.key = key; this.build(map); }
     const g = this.canvas.getContext("2d")!;
     g.drawImage(this.bg, 0, 0);
-    if (barriers && map === "NEON") {
-      for (const w of BARRIERS) { g.fillStyle = BARRIER_COLOR[w.role]; this.rect(g, map, w); }
-    }
     for (const d of dots) {
       const [x, y] = this.px(map, d.x, d.y);
       const r = (d.me ? 2.2 : 1.7) * this.k;

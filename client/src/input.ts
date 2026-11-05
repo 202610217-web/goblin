@@ -1,14 +1,12 @@
 // 입력 추상화: 터치(조이스틱/버튼/카메라 드래그)와 키보드가 같은 상태를 채운다.
-// 게임 코드는 이 상태(moveX/moveY, actionHeld, consumeJump/consumeAttack/consumeCamera)만 읽는다.
+// 게임 코드는 이 상태(moveX/moveY, consumeJump/consumeAttack/consumeCamera)만 읽는다.
 import { CONFIG } from "./config";
 
 export class Input {
   /** 이동 스틱 (-1~1, y=앞). 8방향으로 양자화된 값 */
   moveX = 0;
   moveY = 0;
-  /** [행동] 버튼(꾹 누르기)을 누르고 있는지 (터치 또는 K 키) */
-  actionHeld = false;
-  /** false면 이동/행동/타격/점프 입력을 막는다 (카메라 회전은 항상 가능) */
+  /** false면 이동/타격/점프 입력을 막는다 (카메라 회전은 항상 가능) */
   enabled = true;
   /** Tab 키 / 점수판 토글 요청 */
   onToggleScoreboard: () => void = () => {};
@@ -18,7 +16,6 @@ export class Input {
   private jumpQueued = false;
   private crouchQueued = false;
   private attackQueued = false;
-  private touchAction = false;
 
   // 터치 상태 (각 컨트롤은 처음 잡은 포인터 id만 추적)
   private stickId: number | null = null;
@@ -32,7 +29,7 @@ export class Input {
     private touchLayer: HTMLElement,
     private stickBase: HTMLElement,
     private stickKnob: HTMLElement,
-    buttons: { jump: HTMLElement; attack: HTMLElement; action: HTMLElement; crouch: HTMLElement },
+    buttons: { jump: HTMLElement; attack: HTMLElement; crouch: HTMLElement },
   ) {
     touchLayer.addEventListener("pointerdown", (e) => this.onDown(e));
     touchLayer.addEventListener("pointermove", (e) => this.onMove(e));
@@ -42,10 +39,8 @@ export class Input {
     bindButton(buttons.jump, () => { if (this.enabled) this.jumpQueued = true; }, () => {});
     bindButton(buttons.crouch, () => { if (this.enabled) this.crouchQueued = true; }, () => {});
     bindButton(buttons.attack, () => { if (this.enabled) this.attackQueued = true; }, () => {});
-    // 행동 버튼: 손가락이 버튼 밖으로 미끄러져도 누른 상태 유지, 실제로 뗄 때만 해제
-    bindButton(buttons.action, () => { this.touchAction = true; }, () => { this.touchAction = false; });
 
-    // 키보드 (개발/테스트용 보조 입력): WASD 이동, Space 점프, C 앉기, J 타격, K 행동, Tab 점수판, Q/E/방향키 카메라
+    // 키보드 (개발/테스트용 보조 입력): WASD 이동, Space 점프, C 앉기, J 타격, Tab 점수판, Q/E/방향키 카메라
     window.addEventListener("keydown", (e) => {
       if ((e.target as HTMLElement).tagName === "INPUT") return;
       const k = e.key.toLowerCase();
@@ -77,8 +72,6 @@ export class Input {
     this.stickId = null;
     this.camId = null;
     this.touchStick = { x: 0, y: 0 };
-    this.touchAction = false;
-    this.actionHeld = false;
     this.stickBase.style.display = "none";
     this.jumpQueued = false;
     this.crouchQueued = false;
@@ -96,7 +89,6 @@ export class Input {
     const q = quantize8(x, y);
     this.moveX = this.enabled ? q.x : 0;
     this.moveY = this.enabled ? q.y : 0;
-    this.actionHeld = this.enabled && (this.touchAction || k.has("k"));
     const rot = (k.has("arrowleft") || k.has("q") ? 1 : 0) - (k.has("arrowright") || k.has("e") ? 1 : 0);
     const tilt = (k.has("arrowup") ? 1 : 0) - (k.has("arrowdown") ? 1 : 0);
     this.yawDelta += rot * CONFIG.CAMERA_KEY_SPEED * dt;

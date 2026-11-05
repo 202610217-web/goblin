@@ -2,7 +2,7 @@
 // 좌표 변환: 게임 (x=동, y=북, z=위) → Three.js (X=x, Y=z, Z=-y)
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { BARRIERS, BARRIER_HEIGHT, BOXES, BOXES_BY_MAP, type Box, HOUSES, MAPS, type MapId, PHYS, type TeamId, mapAt } from "../../shared/world";
+import { BOXES, BOXES_BY_MAP, type Box, HOUSES, MAPS, type MapId, PHYS, type TeamId, mapAt } from "../../shared/world";
 import { NEON_GRID, NEON_ZONES, cellCenter } from "../../shared/neon";
 import { AIM, type Vec3, aimConverge, aimRay, clampPitch, rayAabb } from "../../shared/aim";
 import type { Body } from "../../shared/sim";
@@ -37,9 +37,9 @@ export class World3D {
     this.buildMap();
     this.buildNeon();
     this.setMap("CLASSIC");
-    // 처음 NEON으로 바꿀 때 한참 멈추지 않게 숨긴 맵의 셰이더도 미리 만든다 (compile은 보이는 것만 훑음)
+    // 처음 NEON으로 바꿀 때·화질을 바꿀 때 한참 멈추지 않게, 숨긴 맵까지 두 화질의 셰이더를 미리 만든다 (compile은 보이는 것만 훑음)
     this.neon.visible = true;
-    this.renderer.compileAsync(this.scene, this.camera).catch(() => {});
+    this.light.warmUp();
     this.neon.visible = false;
     this.resize();
     window.addEventListener("resize", () => this.resize());
@@ -72,7 +72,6 @@ export class World3D {
   /** 맵별 장면 묶음 (고른 맵만 보인다) */
   private classic = new THREE.Group();
   private neon = new THREE.Group();
-  private barrierGroup = new THREE.Group();
 
   /** 보여 줄 맵 */
   setMap(map: MapId) {
@@ -104,8 +103,6 @@ export class World3D {
     }).catch(() => { /* 모델을 못 받으면 사진 상자 그대로 */ });
   }
 
-  /** 준비 시간 결계 보이기/숨기기 */
-  setBarriers(on: boolean) { this.barrierGroup.visible = on; }
 
   private buildMap() {
     this.scene.add(this.classic);
@@ -323,8 +320,8 @@ export class World3D {
     floor(NEON_ZONES.siteA, photoMat("patterned_concrete_pavers", { tint: 0xffd9a0 }), 0.01, 3);
     floor(NEON_ZONES.siteB, photoMat("patterned_concrete_pavers", { tint: 0xb8f0ff }), 0.01, 3);
     const zone = (color: number) => new THREE.MeshStandardMaterial({ color, transparent: true, opacity: 0.3, depthWrite: false, roughness: 1 });
-    floor(NEON_ZONES.spawnAtk, zone(0xff5a5a), 0.02);
-    floor(NEON_ZONES.spawnDef, zone(0x4fa8ff), 0.02);
+    floor(NEON_ZONES.spawnA, zone(0xff5a5a), 0.02);
+    floor(NEON_ZONES.spawnB, zone(0x4fa8ff), 0.02);
     const fenceMat = photoMat("concrete_block_wall", { tint: 0x9aa0b0 });
     for (const [cx, cy, sx, sy] of [[m.x0 + w / 2, -0.1, w + 0.4, 0.2], [m.x0 + w / 2, h + 0.1, w + 0.4, 0.2], [m.x0 - 0.1, h / 2, 0.2, h], [m.x1 + 0.1, h / 2, 0.2, h]] as const) {
       this.addBox(g, { x0: cx - sx / 2, x1: cx + sx / 2, y0: cy - sy / 2, y1: cy + sy / 2, z0: 0, z1: 1.2, kind: "wall" }, fenceMat, 2);
@@ -438,16 +435,6 @@ export class World3D {
       sp.position.set((b.x0 + b.x1) / 2, b.z1 + 2.5, -(b.y0 + b.y1) / 2);
       g.add(sp);
     }
-    // 결계: 반투명 벽 (역할별 색: 모두 = 보라, 공격팀만 = 빨강, 수비팀만 = 파랑)
-    const color = { all: 0xff3df0, atk: 0xff5a5a, def: 0x4fa8ff } as const;
-    for (const w of BARRIERS) {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w.x1 - w.x0, BARRIER_HEIGHT, w.y1 - w.y0),
-        new THREE.MeshBasicMaterial({ color: color[w.role], transparent: true, opacity: 0.35, depthWrite: false }));
-      mesh.position.set((w.x0 + w.x1) / 2, BARRIER_HEIGHT / 2, -(w.y0 + w.y1) / 2);
-      this.barrierGroup.add(mesh);
-    }
-    this.barrierGroup.visible = false;
-    g.add(this.barrierGroup);
   }
 
   /** 지금 카메라 거리 비율 (1 = 기본 거리, 벽에 가리면 작아짐) */
@@ -481,6 +468,17 @@ export class World3D {
       y + Math.sin(this.yaw) * Math.cos(p) * c,
       head.z - Math.sin(p) * c, tmp));
     return this.camK;
+  }
+
+  /** 카메라에서 이 점(게임 좌표)까지 벽·건물·상자에 가리지 않고 보이는지 (작은 물체도 엄폐로 친다) */
+  canSee(x: number, y: number, z: number): boolean {
+    const c = this.camera.position, from = { x: c.x, y: -c.z, z: c.y };
+    const d = { x: x - from.x, y: y - from.y, z: z - from.z };
+    for (const b of BOXES) {
+      const t = rayAabb(from, d, { x: b.x0, y: b.y0, z: b.z0 }, { x: b.x1, y: b.y1, z: b.z1 });
+      if (t !== null && t < 1) return false;
+    }
+    return true;
   }
 
   /** 머리에서 d 방향 선분(0~1)이 처음 벽/집(지붕 포함)에 닿는 비율. 안 닿으면 1 */
@@ -653,8 +651,6 @@ export class PlayerView {
     this.group.add(this.char.root);
   }
   private char: Character | null = null;
-  /** 지금 하고 있는 일 (부수기·수리 / 치유) → 그 동작을 반복 */
-  activity: "work" | "revive" | null = null;
   private lastMs = 0;
   private lastX = 0;
   private lastY = 0;
@@ -673,6 +669,8 @@ export class PlayerView {
   nearCamera = false;
   /** 은신한 상대: 아예 그리지 않는다 (그림자 고리·이름표까지) */
   hidden = false;
+  /** 이름표·체력만 숨김 (엄폐물 뒤의 상대) */
+  labelHidden = false;
 
   update(x: number, y: number, z: number, faceRad: number, groundZ: number, state: 0 | 1 | 2, invuln: boolean, dim: boolean, nowMs: number, crouch = false) {
     this.pivot.scale.y = state === 0 && crouch ? PHYS.CROUCH_HEIGHT / PHYS.PLAYER_HEIGHT : 1; // 앉으면 낮게
@@ -714,7 +712,7 @@ export class PlayerView {
       this.pivot.visible = false;
       ch.root.visible = !this.nearCamera;
       const pose: Pose = state === 2 ? "dead" : state === 1 ? "down" : z - groundZ > 0.25 ? "air"
-        : this.activity ?? (this.speed > 4 ? "run" : this.speed > 0.4 ? "walk" : "idle");
+        : this.speed > 4 ? "run" : this.speed > 0.4 ? "walk" : "idle";
       ch.setPose(pose, this.speed);
       ch.setLook(nowMs < this.flashUntil, opacity, state === 2);
       ch.crouch = state === 0 && crouch; // 무릎 굽혀 앉기 (걸으면 앉은 채 걷기)
@@ -724,7 +722,7 @@ export class PlayerView {
 
   /** 이름표를 화면 좌표로 옮긴다 */
   placeLabel(camera: THREE.Camera, w: number, h: number) {
-    if (this.nearCamera || this.hidden) { this.label.style.display = "none"; return; }
+    if (this.nearCamera || this.hidden || this.labelHidden) { this.label.style.display = "none"; return; }
     tmp.copy(this.group.position);
     tmp.y += PHYS.PLAYER_HEIGHT + 0.35;
     tmp.project(camera);

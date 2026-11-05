@@ -10,10 +10,10 @@ const FILE: Record<ClassId, string> = { KNIGHT: "knight", ARCHER: "rogue_hooded"
 /** 공격 동작 (직업별) */
 const ATTACK: Record<ClassId, string> = { KNIGHT: "1H_Melee_Attack_Slice_Diagonal", ARCHER: "2H_Ranged_Shoot", JAVELIN: "Throw", GOBLIN: "1H_Melee_Attack_Stab" };
 
-export type Pose = "idle" | "walk" | "run" | "air" | "down" | "dead" | "work" | "revive";
+export type Pose = "idle" | "walk" | "run" | "air" | "down" | "dead";
 const CLIP: Record<Pose, string> = {
   idle: "Idle", walk: "Walking_A", run: "Running_A", air: "Jump_Idle",
-  down: "Lie_Idle", dead: "Death_A", work: "1H_Melee_Attack_Chop", revive: "PickUp",
+  down: "Lie_Idle", dead: "Death_A",
 };
 /** 걷기·달리기 동작이 원래 표현하는 속도 (m/s, 모델 키에 맞춘 값). 실제 속도 / 이 값 = 재생 속도 */
 const NOMINAL_SPEED = { walk: 2.6, run: 5.6 };

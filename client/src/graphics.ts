@@ -139,10 +139,10 @@ export function fitTo(o: THREE.Object3D, sx: number, sy: number, sz: number) {
 }
 
 // ---------- 하늘·해·그림자·블룸 ----------
-/** 맵별 시간대: 기본 맵 = 맑은 오후, NEON = 해 질 녘(네온이 빛나 보이게) */
+/** 맵별 시간대: 기본 맵 = 맑은 오후, NEON = 늦은 오후. 해는 북쪽(옆)에 둬서 동서로 싸우는 두 팀 누구도 해를 정면으로 보지 않게 */
 const LIGHTING: Record<MapId, { elevation: number; azimuth: number; turbidity: number; rayleigh: number; exposure: number; sun: number; sunColor: number; fog: number; fogDensity: number; env: number; hemi: number }> = {
   CLASSIC: { elevation: 38, azimuth: 210, turbidity: 4, rayleigh: 1.2, exposure: 0.55, sun: 3.2, sunColor: 0xfff1de, fog: 0xc3d3e3, fogDensity: 0.006, env: 0.45, hemi: 0.7 },
-  NEON: { elevation: 13, azimuth: 250, turbidity: 8, rayleigh: 2.2, exposure: 0.5, sun: 3, sunColor: 0xffc08a, fog: 0x9a8088, fogDensity: 0.009, env: 0.8, hemi: 1.3 },
+  NEON: { elevation: 30, azimuth: 180, turbidity: 8, rayleigh: 2.2, exposure: 0.5, sun: 3, sunColor: 0xffc08a, fog: 0x9a8088, fogDensity: 0.009, env: 0.8, hemi: 1.3 },
 };
 
 export class Lighting {
@@ -182,25 +182,54 @@ export class Lighting {
     this.setQuality(this.high);
   }
 
-  /** 고화질 켬/끔: 그림자 해상도, 블룸 */
+  /**
+   * 고화질 켬/끔: 그림자 해상도, 블룸.
+   * 블룸은 장면을 화면 밖 버퍼에 그려서 재질 셰이더가 따로 필요하다. 바꾸는 순간 한꺼번에 만들면 패드가 몇 초 멈추므로,
+   * 지금 화질로 계속 그리면서 새 셰이더를 뒤에서 만들고(compileAsync) 다 되면 바꾼다
+   */
   setQuality(high: boolean) {
     this.high = high;
-    const size = high ? 2048 : 1024;
-    this.sun.shadow.mapSize.set(size, size);
-    this.sun.shadow.map?.dispose();
-    this.sun.shadow.map = null;
-    this.sun.castShadow = true;
+    const token = ++this.qualityToken;
     if (high && !this.composer) {
       const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
       this.composer = new EffectComposer(this.renderer, rt);
       this.composer.addPass(new RenderPass(this.scene, this.camera));
       // 아주 밝은 것(네온·전구)만 번짐
-      this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), 0.45, 0.25, 12));
+      this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), 0.3, 0.2, 12));
       this.composer.addPass(new OutputPass());
       this.resize();
     }
-    if (!high) { this.composer?.dispose(); this.composer = null; }
+    const prev = this.renderer.getRenderTarget();
+    this.renderer.setRenderTarget(high ? this.composer!.readBuffer : null);
+    const ready = this.renderer.compileAsync(this.scene, this.camera);
+    this.renderer.setRenderTarget(prev);
+    const apply = () => {
+      if (token !== this.qualityToken) return; // 그 사이에 또 바꿨으면 무시
+      const size = high ? 2048 : 1024;
+      this.sun.shadow.mapSize.set(size, size);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+      this.sun.castShadow = true;
+      this.useComposer = high;
+      if (!high) { this.composer?.dispose(); this.composer = null; }
+    };
+    ready.then(apply, apply);
   }
+  private qualityToken = 0;
+
+  /** 화면에 바로 그리는 셰이더(보통 화질)와 버퍼에 그리는 셰이더(고화질 블룸)를 둘 다 미리 만든다. 시작할 때 한 번 */
+  warmUp() {
+    const prev = this.renderer.getRenderTarget();
+    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+    for (const target of [null, rt]) {
+      this.renderer.setRenderTarget(target);
+      this.renderer.compileAsync(this.scene, this.camera).catch(() => {});
+    }
+    this.renderer.setRenderTarget(prev);
+    rt.dispose();
+  }
+  /** 지금 블룸 경로로 그리는지 (셰이더가 준비된 뒤에 바뀐다) */
+  private useComposer = false;
 
   /** 맵에 맞는 시간대로 하늘·해·안개·환경광을 바꾼다 */
   setMap(map: MapId) {
@@ -239,7 +268,7 @@ export class Lighting {
   }
 
   render() {
-    if (this.composer) this.composer.render();
+    if (this.useComposer && this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
   }
 }

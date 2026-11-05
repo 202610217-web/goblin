@@ -1,16 +1,11 @@
 // 마감 시각 목록 관리 (순수 함수)
 // Durable Object 알람은 1개만 걸 수 있으므로, 여러 마감 시각을 목록으로 들고 있다가
 // 가장 가까운 시각으로 알람을 다시 건다.
-// 이후 단계에서 페이즈 종료/작업 완료/사망/치유 완료 등이 kind로 추가된다.
 
-export type DeadlineKind = "reconnect" | "phase" | "work" | "death" | "revive" | "bot";
+export type DeadlineKind = "reconnect" | "phase" | "respawn" | "bot";
 
-/**
- * 같은 시각에 겹치면 먼저 처리할 순서.
- * 작업 완료 > 치유 완료 > 사망 > 단계 시간 초과 > 재접속 마감
- * (예: 치유 완료와 사망이 같은 순간이면 치유가 먼저 = 살아남는다)
- */
-const PRIORITY: Record<DeadlineKind, number> = { work: 0, revive: 1, death: 2, phase: 3, reconnect: 4, bot: 5 };
+/** 같은 시각에 겹치면 먼저 처리할 순서: 부활 > 단계 시간 초과 > 재접속 마감 > 더미 */
+const PRIORITY: Record<DeadlineKind, number> = { respawn: 0, phase: 1, reconnect: 2, bot: 3 };
 
 export interface Deadline {
   kind: DeadlineKind;
