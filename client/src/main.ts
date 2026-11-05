@@ -119,14 +119,11 @@ roomInput.addEventListener("input", () => {
 });
 // 가상 키보드가 올라와도 입력창이 보이도록
 for (const el of [roomInput, nickInput]) el.addEventListener("focus", () => setTimeout(() => el.scrollIntoView({ block: "center" }), 300));
-$("randomRoom").onclick = () => {
+/** 방 코드: 들어가기는 입력한 코드, 만들기는 새 코드 (헷갈리는 글자 0/O, 1/I 뺌) */
+function readRoomCode(make: boolean): string | null {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  roomInput.value = Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-};
-/** 입력한 방 코드 확인 (없으면 새로 만든다) */
-function readRoomCode(makeIfEmpty: boolean): string | null {
-  if (makeIfEmpty && !roomInput.value.trim()) ($("randomRoom") as HTMLButtonElement).click();
-  const code = roomInput.value.trim().toUpperCase();
+  const code = make ? Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join("") : roomInput.value.trim().toUpperCase();
+  if (!make && !code) { showJoinError("친구에게 받은 방 코드를 넣어 주세요"); roomInput.focus(); return null; }
   if (!/^[A-Z0-9]{4,6}$/.test(code)) { showJoinError("방 코드는 4~6자리 영문/숫자예요"); return null; }
   try { localStorage.setItem("nickname", nickInput.value.trim()); } catch { /* 무시 */ }
   (document.activeElement as HTMLElement | null)?.blur();
@@ -624,6 +621,8 @@ function renderLobby() {
       return d;
     }));
   }
+  // 팀 이동 버튼은 내가 없는 팀에만
+  document.querySelectorAll<HTMLButtonElement>("[data-team]").forEach((b) => b.classList.toggle("hidden", b.dataset.team === myInfo()?.team));
   const bots = room.players.filter((p) => p.bot).length;
   $("addBotsBtn").classList.toggle("hidden", room.players.length >= 4);
   $("removeBotsBtn").classList.toggle("hidden", bots === 0);
@@ -665,8 +664,8 @@ function renderClassSelect() {
   $("classSelect").classList.toggle("hidden", !show);
   if (!show) return;
   document.querySelectorAll<HTMLButtonElement>("[data-cls]").forEach((b) => b.classList.toggle("on", b.dataset.cls === mine.cls));
-  setText("classTeam", room!.players.filter((p) => p.team === mine.team)
-    .map((p) => `${p.id === myId ? "나" : p.nickname}: ${CLASSES[p.cls].name}`).join(" · "));
+  setText("classTeam", "우리 팀  " + room!.players.filter((p) => p.team === mine.team)
+    .map((p) => `${p.id === myId ? "나" : p.nickname} ${CLASSES[p.cls].name}`).join("   "));
 }
 
 const PHASE_NAME: Record<Phase, string> = {

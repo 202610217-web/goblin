@@ -21,57 +21,67 @@
 <body>
   <div id="stage"></div>
 
-  <!-- 입장 화면 -->
+  <!-- 입장 화면: 닉네임 → 새 방 만들기 / 코드로 들어가기 -->
   <div id="join" class="panel">
-    <h1>집 부수기 3D</h1>
-    <label>방 코드 <input id="roomInput" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD" /></label>
-    <label>닉네임 <input id="nickInput" maxlength="12" autocomplete="off" placeholder="닉네임" /></label>
-    <div class="row">
-      <button id="randomRoom" class="secondary">새 방 코드</button>
-      <button id="joinBtn">입장</button>
-    </div>
-    <div class="row">
-      <button id="hostBtn" class="secondary">내 기기로 방 만들기</button>
+    <h1>집 부수기</h1>
+    <p class="tagline">2 대 2 · 부수고, 지키고, 고치기</p>
+    <label class="field"><span>닉네임</span><input id="nickInput" maxlength="12" autocomplete="off" placeholder="닉네임" /></label>
+    <div class="joinSplit">
+      <section>
+        <h3 class="sub">새 방</h3>
+        <button id="hostBtn">방 만들기</button>
+        <p class="hint small">이 기기가 방이 돼요. 로비에 뜨는 코드를 친구에게 알려 주세요</p>
+      </section>
+      <section>
+        <h3 class="sub">친구 방</h3>
+        <div class="codeRow">
+          <input id="roomInput" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="코드" aria-label="방 코드" />
+          <button id="joinBtn">입장</button>
+        </div>
+      </section>
     </div>
     <p id="joinError" class="error"></p>
-    <p id="a2hsHint" class="hint hidden">홈 화면에 추가하면 전체 화면으로 즐길 수 있어요 (공유 버튼 → 홈 화면에 추가)</p>
+    <p id="a2hsHint" class="hint small hidden">홈 화면에 추가하면 전체 화면으로 할 수 있어요 (공유 → 홈 화면에 추가)</p>
   </div>
 
   <!-- 로비 -->
   <div id="lobby" class="panel hidden">
-    <h2>방 <span id="lobbyRoom"></span></h2>
+    <header class="lobbyHead">
+      <div class="roomCode"><small>방 코드</small><b id="lobbyRoom"></b></div>
+      <button id="leaveBtn" class="secondary">나가기</button>
+    </header>
     <div class="lobbyGrid">
       <section>
         <div class="teams">
-          <div class="team A"><h3>A팀</h3><div id="teamA"></div><button data-team="A" class="secondary">A팀으로</button></div>
-          <div class="team B"><h3>B팀</h3><div id="teamB"></div><button data-team="B" class="secondary">B팀으로</button></div>
+          <div class="team A"><h3>A팀</h3><div id="teamA"></div><button data-team="A" class="secondary">여기로 이동</button></div>
+          <div class="team B"><h3>B팀</h3><div id="teamB"></div><button data-team="B" class="secondary">여기로 이동</button></div>
         </div>
-        <div class="row"><button id="readyBtn">준비</button><button id="startBtn" class="hidden">게임 시작</button><button id="leaveBtn" class="secondary">나가기</button></div>
+        <div class="lobbyActions"><button id="readyBtn">준비</button><button id="startBtn" class="hidden">게임 시작</button></div>
         <p id="startHint" class="hint small"></p>
       </section>
       <section>
         <h3 class="sub">맵</h3>
-        <div class="row" id="mapRow">
-          <button data-map="CLASSIC" class="secondary">기본 맵</button>
-          <button data-map="NEON" class="secondary">NEON DISTRICT</button>
+        <div id="mapRow">
+          <button data-map="CLASSIC" class="secondary"><b>기본 맵</b><small>팀마다 집 하나 · 작은 마을</small></button>
+          <button data-map="NEON" class="secondary"><b>NEON DISTRICT</b><small>A · B 두 건물 · 넓은 도시</small></button>
         </div>
         <h3 class="sub">혼자 연습</h3>
-        <div class="row practice">
+        <div class="practice">
           <button id="addBotsBtn" class="secondary">더미로 채우기</button>
           <button id="removeBotsBtn" class="secondary hidden">더미 빼기</button>
-          <button id="practiceBtn" class="secondary">연습 시작</button>
+          <button id="practiceBtn" class="secondary">바로 연습</button>
         </div>
         <h3 class="sub">설정</h3>
         <label class="check"><input type="checkbox" id="vibrateToggle" /> 맞으면 진동</label>
-        <label class="check"><input type="checkbox" id="gfxToggle" /> 고화질 그래픽 (선명한 그림자 · 빛 번짐)</label>
+        <label class="check"><input type="checkbox" id="gfxToggle" /> 고화질 (그림자 · 빛 번짐)</label>
       </section>
     </div>
   </div>
 
   <!-- 직업 선택 (경기 시작 직후 5초) -->
   <div id="classSelect" class="panel hidden">
-    <h2>직업 선택 · <span id="classLeft"></span>초</h2>
-    <div class="row">
+    <header class="classHead"><h2>직업 고르기</h2><b id="classLeft"></b></header>
+    <div class="classGrid">
       <button data-cls="KNIGHT" class="secondary classCard"></button>
       <button data-cls="ARCHER" class="secondary classCard"></button>
       <button data-cls="JAVELIN" class="secondary classCard"></button>

@@ -70,7 +70,6 @@ button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 .team { flex: 1; border: 2px solid #444; border-radius: 12px; padding: 8px; font-size: 20px; min-height: 140px; }
 .team.A { border-color: var(--teamA); } .team.B { border-color: var(--teamB); }
 .team h3 { margin: 4px 0 8px; }
-.team .me { text-decoration: underline; font-weight: 700; }
 .team .ready { color: var(--ok); }
 
 /* 상단 HUD: 화면 상단 중앙 */
@@ -163,7 +162,6 @@ button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64
 #attackBtn { right: 140px; bottom: 6px; width: 96px; height: 96px; background: rgba(255, 107, 107, 0.85); overflow: hidden; }
 #attackBtn.cooling { background: rgba(120, 60, 60, 0.7); color: #ddd; }
 #attackCd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, 0.45); }
-#jumpBtn { right: 16px; bottom: 142px; width: 84px; height: 84px; background: rgba(240, 240, 240, 0.7); }
 .ring { position: absolute; inset: -8px; width: calc(100% + 16px); height: calc(100% + 16px); transform: rotate(-90deg); pointer-events: none; }
 .ring circle { fill: none; stroke-width: 6; stroke: transparent; }
 .ring #actionRing { stroke: #fff; stroke-linecap: round; stroke-dasharray: 289; stroke-dashoffset: 289; }
@@ -237,15 +235,6 @@ button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64
 }
 @media (prefers-reduced-motion: reduce) { .gameBtn.pressed { transform: none; } }
 
-/* 직업 선택 카드 */
-.classCard { min-width: 200px; }
-.classCard small { display: block; font-size: 15px; font-weight: 500; margin-top: 4px; }
-.classCard.on { background: var(--ok); color: #111; outline: 3px solid #fff; }
-#startBtn:disabled { opacity: 0.45; }
-
-/* 맵 선택 */
-#mapRow button.on { background: var(--accent); color: #111; outline: 3px solid #fff; }
-#mapRow button:disabled { opacity: 0.6; }
 
 /* NEON: A/B 사이트 체력 */
 #siteBars { display: flex; gap: 10px; background: rgba(0, 0, 0, 0.6); border-radius: 10px; padding: 6px 12px; }
@@ -264,25 +253,6 @@ button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64
   border: 1px solid #555; border-radius: 6px; background: #111; opacity: 0.92; pointer-events: none; z-index: 8;
 }
 @media (max-height: 500px) { #minimap { width: 150px; top: calc(var(--safe-t) + 100px); } }
-
-/* ---------- 로비: 넓은 가로 화면(iPad)에서는 두 칸으로 → 스크롤 없이 한 화면 ---------- */
-.roomShare { display: block; font-size: 15px; font-weight: 400; color: #aab; margin-top: 2px; }
-.lobbyGrid { display: grid; gap: 8px 20px; }
-.lobbyGrid section { min-width: 0; }
-h3.sub { margin: 10px 0 2px; font-size: 15px; color: #9aa3b5; letter-spacing: 1px; text-align: left; }
-@media (min-width: 900px) {
-  #lobby { width: min(1040px, calc(100vw - 32px)); }
-  .lobbyGrid { grid-template-columns: 1.15fr 1fr; align-items: start; }
-  .lobbyGrid section + section { border-left: 1px solid #333; padding-left: 20px; }
-  #lobby button { min-height: 52px; padding: 8px 16px; font-size: 18px; }
-  #lobby .team { min-height: 110px; }
-}
-
-/* ---------- 직업 카드: 능력치 막대 ---------- */
-.classCard { text-align: left; min-width: 220px; }
-.classCard .stats { margin-top: 6px; display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; align-items: center; font-size: 13px; font-weight: 500; }
-.classCard .stat { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.15); overflow: hidden; }
-.classCard .stat i { display: block; height: 100%; background: currentColor; }
 
 /* ---------- 역할 배지 ---------- */
 #hudRole.atk { border-left: 4px solid #ff6b6b; }
@@ -374,15 +344,7 @@ button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 .tag { font-style: normal; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 3px; border: 1px solid var(--line-strong); color: var(--muted); }
 .tag.ok { border-color: var(--ok); color: var(--ok); }
 .team button { width: 100%; margin: 8px 0 0; }
-#mapRow { display: flex; gap: 8px; }
-#mapRow button { flex: 1; margin: 0; }
 
-/* 직업 카드 */
-.classCard { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 16px; min-height: 0; font-size: 18px; border-radius: 6px; }
-.classCard .ic { margin-bottom: 4px; color: var(--muted); }
-.classCard small { font-size: 13px; font-weight: 400; color: var(--muted); }
-.classCard.on { background: var(--raised); color: var(--fg); outline: none; border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
-.classCard.on .ic { color: var(--fg); }
 
 /* HUD: 점수판 · 역할 · 사이트 (Figma HUD 위 가운데, 간격 8) */
 #hud { top: calc(var(--safe-t) + 16px); gap: 8px; }
@@ -462,9 +424,6 @@ button.iconBtn { position: fixed; width: 40px; height: 40px; min-height: 40px; m
 #actionBtn.disabled { background: rgba(11, 13, 16, 0.35); color: var(--dim); border-color: var(--line); }
 #actionBtn:not(.disabled):not(.revive) { border-color: var(--siteA); }
 .ring #actionRing { stroke: var(--fg); stroke-width: 4; }
-.gameBtn.sm { width: 64px; height: 64px; bottom: 16px; }
-#jumpBtn { right: 112px; }
-#crouchBtn { right: 192px; }
 #crouchBtn.on { background: rgba(232, 234, 237, 0.24); border-color: var(--fg); }
 #touch.spectate #buttons .gameBtn { display: none; }
 
@@ -474,10 +433,7 @@ button.iconBtn { position: fixed; width: 40px; height: 40px; min-height: 40px; m
   .teamPanel.left, .teamPanel.right, #minimap { transform: scale(0.8); }
   button.iconBtn { transform: none; }
 }
-/* 작은 엄지 버튼: 예전 #jumpBtn 규칙보다 우선하도록 id로 */
-#jumpBtn, #crouchBtn { width: 64px; height: 64px; bottom: 16px; background: rgba(11, 13, 16, 0.55); }
-#jumpBtn { right: 112px; }
-#crouchBtn { right: 192px; }
+#jumpBtn, #crouchBtn { background: rgba(11, 13, 16, 0.55); }
 #jumpBtn.pressed, #crouchBtn.on { background: rgba(232, 234, 237, 0.24); }
 #crouchBtn.on { border-color: var(--fg); }
 /* 라운드 결과: 패널 + 이긴 팀 색 윗줄 */
@@ -487,3 +443,90 @@ button.iconBtn { position: fixed; width: 40px; height: 40px; min-height: 40px; m
 /* 맞은 방향: 화면 가장자리 쪽 얇은 빨간 호 */
 .dmgDir { width: 84vmin; height: 84vmin; margin: -42vmin 0 0 -42vmin; background: none; border: 0 solid transparent; border-top: 5px solid rgba(229, 72, 77, 0.9); }
 .error:empty { display: none; } /* 오류가 없으면 빈 칸도 없게 */
+
+/* =====================================================================
+ * 화면 v3 — 패드 가로(1180×820 기준)에서 한눈에: 왼쪽 정렬, 할 일 하나에 버튼 하나
+ * ===================================================================== */
+.panel { text-align: left; }
+.sub:first-child { margin-top: 0; }
+
+/* 입장 */
+#join { width: min(560px, calc(100vw - 32px)); padding: 32px; }
+#join h1 { font-size: 34px; font-weight: 700; margin: 0; letter-spacing: -0.02em; }
+.tagline { margin: 4px 0 24px; color: var(--dim); font-size: 14px; }
+.field { display: grid !important; gap: 6px; margin: 0 0 20px !important; font-size: 13px !important; color: var(--muted); }
+.field input { width: 100%; max-width: none; }
+.joinSplit { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0; border-top: 1px solid var(--line); }
+.joinSplit section { padding: 16px 0 0; }
+.joinSplit section + section { border-left: 1px solid var(--line); padding-left: 20px; }
+.joinSplit section:first-child { padding-right: 20px; }
+#hostBtn { width: 100%; margin: 0; min-height: 52px; font-size: 16px; }
+.joinSplit .hint { margin-top: 8px; line-height: 1.45; }
+.codeRow { display: flex; gap: 8px; }
+.codeRow input { flex: 1; min-width: 0; width: auto; font: 600 20px var(--mono); letter-spacing: 0.2em; text-transform: uppercase; height: 52px; }
+.codeRow button { margin: 0; min-height: 52px; background: var(--raised); color: var(--fg); border-color: var(--line-strong); }
+#joinError { margin: 16px 0 0; font-size: 14px; color: var(--muted); }
+
+/* 로비 */
+#lobby { width: min(1040px, calc(100vw - 32px)); padding: 24px 28px; }
+.lobbyHead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.roomCode { display: flex; align-items: baseline; gap: 12px; }
+.roomCode small { font-size: 13px; color: var(--dim); }
+.roomCode b { font: 600 34px/1 var(--mono); letter-spacing: 0.18em; -webkit-user-select: text; user-select: text; }
+.lobbyHead #leaveBtn { margin: 0; min-height: 40px; }
+.lobbyGrid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 28px; align-items: start; }
+.lobbyGrid section + section { border-left: 1px solid var(--line); padding-left: 28px; }
+.teams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.team { min-height: 168px; display: flex; flex-direction: column; }
+.team > div { flex: 1; }
+.team button { margin-top: 12px; min-height: 40px; }
+.lobbyActions { display: flex; gap: 8px; margin-top: 16px; }
+.lobbyActions button { flex: 1; margin: 0; min-height: 56px; font-size: 17px; }
+#readyBtn.on { background: var(--ok); color: var(--ink); border-color: var(--ok); box-shadow: none; }
+#startBtn { background: var(--siteA); color: var(--ink); }
+#startHint { margin-top: 10px; min-height: 1.2em; }
+#mapRow { display: grid; gap: 8px; }
+#mapRow button { margin: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; min-height: 60px; text-align: left; }
+#mapRow button b { font-size: 15px; font-weight: 600; }
+#mapRow button small { font-size: 12px; font-weight: 400; color: var(--muted); }
+#mapRow button.on { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
+#mapRow button:disabled:not(.on) { opacity: 0.45; }
+#mapRow button.on:disabled { opacity: 1; }
+.practice { display: flex; gap: 8px; }
+.practice button { flex: 1; margin: 0; }
+.panel label.check { font-size: 15px; margin: 8px 0; }
+
+/* 직업 고르기: 네 장을 한 줄로 (5초 안에 보고 고르게) */
+#classSelect { width: min(1080px, calc(100vw - 32px)); padding: 24px; }
+.classHead { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; }
+.classHead h2 { margin: 0; }
+#classLeft { font: 600 34px/1 var(--mono); }
+.classGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.classCard { margin: 0; display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 16px; min-height: 0; min-width: 0; text-align: left; font-size: 19px; font-weight: 600; border-radius: 6px; line-height: 1.2; }
+.classCard .ic { color: var(--muted); margin-bottom: 4px; }
+.classCard small { font-size: 12px; font-weight: 400; color: var(--muted); line-height: 1.45; min-height: 3em; }
+.classCard .stats { display: grid; grid-template-columns: 40px 1fr; gap: 6px 8px; align-items: center; margin-top: 6px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.classCard .stat { height: 6px; border-radius: 1px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.classCard .stat i { display: block; height: 100%; background: currentColor; }
+.classCard.on { background: var(--raised); border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
+.classCard.on .ic { color: var(--fg); }
+#classTeam { margin-top: 16px; white-space: pre; }
+
+/* 엄지 버튼: 타격(모서리)을 중심으로 부채꼴 — 점프는 위 왼쪽, 앉기는 왼쪽, 행동은 위 */
+#buttons { width: 240px; height: 236px; }
+#attackBtn { right: 0; bottom: 0; width: 104px; height: 104px; }
+#actionBtn { right: 12px; bottom: 128px; width: 80px; height: 80px; }
+#jumpBtn { right: 112px; bottom: 100px; width: 68px; height: 68px; }
+#crouchBtn { right: 128px; bottom: 8px; width: 64px; height: 64px; }
+
+/* 폰처럼 작은 화면: 패널을 한 줄씩 */
+@media (max-width: 760px) {
+  .joinSplit, .lobbyGrid { grid-template-columns: 1fr; }
+  .joinSplit section + section, .lobbyGrid section + section { border-left: none; padding-left: 0; }
+  .classGrid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-height: 520px) {
+  #join, #lobby, #classSelect { padding: 14px 18px; }
+  .classCard small, .classCard .stats { display: none; }
+  .team { min-height: 0; }
+}

@@ -66,8 +66,8 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     a.push({ t: "debug_phase", phase: "COUNTDOWN" }); await tick(5);
     const ps = last(a, "room_state").players;
     const byName = (n: string) => ps.find((p: any) => p.nickname === n);
-    expect(byName("손님")).toMatchObject({ cls: "ARCHER", combat: { hp: 70 } });
-    expect(byName("방장")).toMatchObject({ cls: "KNIGHT", combat: { hp: 150 } });
+    expect(byName("손님")).toMatchObject({ cls: "ARCHER", combat: { hp: CLASSES.ARCHER.maxHp } });
+    expect(byName("방장")).toMatchObject({ cls: "KNIGHT", combat: { hp: CLASSES.KNIGHT.maxHp } });
     for (const p of ps.filter((p: any) => p.bot)) expect(p.combat.hp).toBe(CLASSES[p.cls as ClassId].maxHp);
     host.stop();
   });
@@ -162,7 +162,7 @@ describe("순서 없이 도착하는 이동 (기기 직접 연결의 빠른 통�
 });
 
 describe("창던지기병", () => {
-  it("직업 선택에서 고르면 체력 100으로 시작", async () => {
+  it("직업 선택에서 고르면 그 직업 체력으로 시작", async () => {
     const host = new HostRoom("JAVL", { DEBUG_COMMANDS: "true" });
     const a = fakePeer();
     host.addPeer(a, "HOST");
@@ -171,7 +171,7 @@ describe("창던지기병", () => {
     a.push({ t: "start_practice" }); await tick(5);
     a.push({ t: "set_class", cls: "JAVELIN" }); await tick(5);
     a.push({ t: "debug_phase", phase: "COUNTDOWN" }); await tick(5);
-    expect(last(a, "room_state").players[0]).toMatchObject({ cls: "JAVELIN", combat: { hp: 100 } });
+    expect(last(a, "room_state").players[0]).toMatchObject({ cls: "JAVELIN", combat: { hp: CLASSES.JAVELIN.maxHp } });
     host.stop();
   });
 });

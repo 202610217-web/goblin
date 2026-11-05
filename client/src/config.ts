@@ -14,7 +14,11 @@ export const CONFIG = {
   CAMERA_WALL_MARGIN: 0.25,
   CAMERA_WALL_PAD: 0.2,
   CAMERA_MIN_RATIO: 0.06,
-  CAMERA_EASE_OUT_S: 0.25,
+  CAMERA_EASE_OUT_S: 0.45,
+  /** 벽에 가릴 때 당겨지는 빠르기 (초). 0이면 순간이동 */
+  CAMERA_EASE_IN_S: 0.07,
+  /** 이보다 작은 물체(가로·세로 m)는 카메라가 피하지 않는다 */
+  CAMERA_IGNORE_SIZE: 1.3,
   /** 카메라 거리 비율이 이보다 작으면 내 캐릭터를 숨김 */
   CAMERA_FADE_RATIO: 0.3,
   /** 화면 드래그 1px당 카메라 회전(라디안), 키보드 회전 속도(라디안/초) */

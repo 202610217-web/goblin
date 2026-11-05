@@ -94,7 +94,6 @@ export class Character {
         const m = o as THREE.Mesh;
         if (!m.isMesh) return;
         const mat = (m.material as THREE.MeshStandardMaterial).clone(); // 사람마다 번쩍임·투명도를 따로
-        if (cls === "GOBLIN" && m.name.startsWith("Rogue_Head")) mat.color.setHex(0x8fd16a); // 초록 피부
         m.material = mat;
         this.mats.push(mat);
         this.baseColors.push(mat.color.clone());
@@ -107,6 +106,7 @@ export class Character {
       this.spine = model.getObjectByName("spine") ?? null;
       this.model = model;
       if (cls === "JAVELIN") this.addSpear(model, l.scale);
+      if (cls === "GOBLIN") this.goblinHead(model);
       this.root.add(model);
       this.mixer = new THREE.AnimationMixer(model);
       for (const c of l.clips) this.actions.set(c.name, this.mixer.clipAction(c));
@@ -122,6 +122,45 @@ export class Character {
       this.current.play();
       this.ready = true;
     }).catch(() => { /* 모델을 못 받으면 예전 도형 캐릭터 그대로 */ });
+  }
+
+  /**
+   * 고블린 = 단검 든 Rogue 몸 + 바바리안 대머리 수염 얼굴(남자)을 초록으로 + 뾰족 귀.
+   * KayKit 캐릭터는 뼈대가 같아서 다른 모델의 머리를 이름이 같은 뼈에 그대로 붙일 수 있다
+   */
+  private goblinHead(model: THREE.Object3D) {
+    const own = model.getObjectByName("Rogue_Head");
+    if (!own) return;
+    const skin = 0x8fd16a;
+    load("JAVELIN").then((d) => {
+      const donor = d.scene.getObjectByName("Barbarian_Head") as THREE.SkinnedMesh | undefined;
+      if (!donor) return;
+      const head = donor.clone();
+      const bones = donor.skeleton.bones.map((b) => model.getObjectByName(b.name) as THREE.Bone);
+      if (bones.some((b) => !b)) return;
+      head.bind(new THREE.Skeleton(bones, donor.skeleton.boneInverses), donor.bindMatrix);
+      const mat = (donor.material as THREE.MeshStandardMaterial).clone();
+      mat.color.setHex(skin);
+      head.material = mat;
+      own.parent!.add(head);
+      own.visible = false;
+      this.mats.push(mat);
+      this.baseColors.push(mat.color.clone());
+      // 귀: 머리 뼈에 납작한 원뿔 두 개 (모델 단위)
+      const hb = model.getObjectByName("head");
+      if (!hb) return;
+      const ear = new THREE.MeshStandardMaterial({ color: 0x7cbf58, roughness: 0.7 });
+      for (const side of [-1, 1]) {
+        const e = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.45, 4), ear);
+        e.position.set(side * 0.55, 0.55, -0.05);
+        e.rotation.z = -side * 1.2;
+        e.scale.z = 0.35;
+        e.castShadow = true;
+        hb.add(e);
+      }
+      this.mats.push(ear);
+      this.baseColors.push(ear.color.clone());
+    }).catch(() => { /* 못 받으면 원래 얼굴 */ });
   }
 
   /** 바바리안 오른손(handslot.r, three에선 handslotr)에 창 (모델 축척을 되돌려 실제 m 크기로) */

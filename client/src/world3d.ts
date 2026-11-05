@@ -469,8 +469,9 @@ export class World3D {
     const d = { x: origin.x - head.x, y: origin.y - head.y, z: origin.z - head.z };
     const len = Math.hypot(d.x, d.y, d.z);
     const want = Math.max(CONFIG.CAMERA_MIN_RATIO, this.hitRatio(head, d) - CONFIG.CAMERA_WALL_MARGIN / len);
-    if (want < this.camK || dt === 0) this.camK = want; // 벽 쪽으로는 바로 (벽 너머가 보이지 않게)
-    else this.camK += (want - this.camK) * (1 - Math.exp(-dt / CONFIG.CAMERA_EASE_OUT_S)); // 돌아갈 때는 부드럽게
+    // 벽 쪽으로는 빠르게, 돌아갈 때는 천천히. 둘 다 부드럽게 (한 프레임에 확 당겨지면 화면이 튐)
+    if (dt === 0) this.camK = want;
+    else this.camK += (want - this.camK) * (1 - Math.exp(-dt / (want < this.camK ? CONFIG.CAMERA_EASE_IN_S : CONFIG.CAMERA_EASE_OUT_S)));
     World3D.toThree(head.x + d.x * this.camK, head.y + d.y * this.camK, head.z + d.z * this.camK, this.camera.position);
     this.light.follow(World3D.toThree(x, y, z, tmp)); // 그림자는 보는 사람 주변만 (해상도 아끼기)
     // 조준 지점 = 머리에서 정면(카메라 방향)으로 AIM_CONVERGE 앞
@@ -487,6 +488,8 @@ export class World3D {
     const pad = CONFIG.CAMERA_WALL_PAD;
     let k = 1;
     for (const b of BOXES) {
+      // 나무 기둥·상자처럼 작은 것은 무시 (지나갈 때마다 카메라가 들락날락하지 않게)
+      if (Math.max(b.x1 - b.x0, b.y1 - b.y0) < CONFIG.CAMERA_IGNORE_SIZE) continue;
       const top = b.kind === "house" && !b.site ? b.z1 + 2.6 : b.z1; // 기본 맵 집은 지붕까지
       const t = rayAabb(head, d, { x: b.x0 - pad, y: b.y0 - pad, z: b.z0 - pad }, { x: b.x1 + pad, y: b.y1 + pad, z: top + pad });
       if (t !== null && t < k) k = t;
