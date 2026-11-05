@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { COLS, NEON_GRID, NEON_SPAWNS, ROWS, cellAt, cellCenter, isFloorCell } from "../../shared/neon";
-import { type Body, groundHeightAt, makeBody, radToAngle, simulate, withAngle } from "../../shared/sim";
+import { type Body, groundHeightAt, makeBody, radToAngle, simulate, withAngle, withJump } from "../../shared/sim";
+import { arrowSegmentHit, makeArrow } from "../../shared/arrow";
 import { BARRIERS, MAPS, PHYS, SITES, type SiteId, isNearSite, mapAt } from "../../shared/world";
 
 /** 격자 길 찾기: 바닥 칸끼리 4방향. blocked(ch)면 못 지나감. 닿은 칸 집합("c,s") */
@@ -94,10 +95,30 @@ describe("NEON DISTRICT 맵", () => {
   });
 
   it("건물을 통과하지 못한다 (동쪽 상가 건물 앞에서 멈춤)", () => {
-    // 시장 거리(s=13)에서 북쪽 E1 건물(c 32~35, s 15~18)로 걸어가기
-    const start = cellCenter(33, 13);
+    // 시장 거리(s=13)에서 북쪽 E1 건물(c 32~35, s 15~18)로 걸어가기 (c 33은 가판대 자리라 c 34)
+    const start = cellCenter(34, 13);
     const b = walk(makeBody(start.x, start.y, 0), N, 3_000);
     expect(b.y).toBeCloseTo(15 * 2 - PHYS.PLAYER_HALF, 3);
+  });
+
+  it("방호벽은 가슴 높이 화살을 막고, 점프로 넘을 수 없다 (엄폐)", () => {
+    // 광장 시장 쪽 방호벽 J (c 28, s 13): 서쪽에서 동쪽으로 쏜 화살은 벽에서 멈춘다
+    const wall = cellCenter(28, 13);
+    const shooter = makeBody(wall.x - 5, wall.y, 0);
+    const arrow = makeArrow(shooter, 0, 0.1, 0);
+    const behind = { id: "e", body: makeBody(wall.x + 2, wall.y, 0) };
+    let hit = null;
+    for (let t = 0; t < 1000 && !hit; t += 50) {
+      const r = arrowSegmentHit(arrow, t, t + 50, [behind]);
+      hit = r.hit;
+      if (r.stopped) break;
+    }
+    expect(hit).toBeNull();
+    // 벽 앞에서 점프하며 걸어도 못 넘어간다
+    let b = withAngle(makeBody(wall.x - 2, wall.y, 0), 0, 0);
+    b = withJump(b, 100)!;
+    b = simulate(b, 1500);
+    expect(b.x).toBeLessThan(wall.x);
   });
 
   it("실내 방: 서쪽 문으로 들어가 동쪽 문으로 나간다", () => {

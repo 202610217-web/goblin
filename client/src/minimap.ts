@@ -3,7 +3,8 @@ import { NEON_REGIONS, NEON_ZONES } from "../../shared/neon";
 import { BARRIERS, BOXES_BY_MAP, type Box, MAPS, type MapId } from "../../shared/world";
 
 const KIND_COLOR: Record<Box["kind"], string> = {
-  building: "#3b4160", wall: "#8a90a2", hedge: "#2f7a3e", crate: "#a27a46", prop: "#7a6690",
+  building: "#3b4160", wall: "#8a90a2", hedge: "#2f7a3e", crate: "#a27a46", cargo: "#8a6438",
+  planter: "#4f8a4a", jersey: "#c9c4b8", fountain: "#5a8ea8", tree: "#2f6b3a",
   step: "#6f7888", platform: "#8c95a8", ramp: "#7c8596", house: "#c9a08a",
 };
 const SITE_COLOR = { A: "#ffb02e", B: "#2ee6ff" } as const;

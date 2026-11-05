@@ -36,7 +36,8 @@ export interface Box {
   x0: number; y0: number; x1: number; y1: number;
   /** 바닥 높이, 윗면 높이 */
   z0: number; z1: number;
-  kind: "wall" | "crate" | "step" | "platform" | "house" | "building" | "hedge" | "prop" | "ramp";
+  kind: "wall" | "crate" | "step" | "platform" | "house" | "building" | "hedge" | "ramp"
+    | "cargo" | "planter" | "jersey" | "fountain" | "tree";
   team?: TeamId;
   /** 목표 건물이면 사이트 (NEON) */
   site?: SiteId;
@@ -96,7 +97,8 @@ function buildBoxes(): Box[] {
 /** NEON 칸 종류 → 충돌 상자 종류와 높이 */
 const NEON_CELL: Record<string, { kind: Box["kind"]; h: number }> = {
   "#": { kind: "building", h: 6 }, T: { kind: "building", h: 9 }, w: { kind: "wall", h: 2.6 }, h: { kind: "hedge", h: 1.5 },
-  c: { kind: "crate", h: 1 }, k: { kind: "prop", h: 2 }, f: { kind: "prop", h: 0.8 }, p: { kind: "platform", h: 1.6 },
+  c: { kind: "crate", h: 1 }, k: { kind: "cargo", h: 2 }, f: { kind: "fountain", h: 0.8 }, p: { kind: "platform", h: 1.6 },
+  q: { kind: "planter", h: 1.4 },
   "1": { kind: "step", h: 0.4 }, "2": { kind: "step", h: 0.8 }, "3": { kind: "step", h: 1.2 },
   A: { kind: "house", h: 4 }, B: { kind: "house", h: 4 },
 };
@@ -113,8 +115,14 @@ function buildNeon(): Box[] {
   for (const r of mergeCells(NEON_GRID, (ch) => ch === "o")) {
     for (let s = r.s0; s <= r.s1; s++) for (let c = r.c0; c <= r.c1; c++) {
       const w = cellRectToWorld({ c0: c, s0: s, c1: c, s1: s });
-      out.push(box((w.x0 + w.x1) / 2, (w.y0 + w.y1) / 2, 0.7, 0.7, 3, "prop"));
+      out.push(box((w.x0 + w.x1) / 2, (w.y0 + w.y1) / 2, 0.7, 0.7, 3, "tree"));
     }
+  }
+  // 방호벽: 칸 가운데 두께 0.7m, 높이 1.4m (가슴 높이 화살을 막고, 점프로 못 넘음)
+  for (const r of mergeCells(NEON_GRID, (ch) => ch === "j" || ch === "J")) {
+    const w = cellRectToWorld(r);
+    const cx = (w.x0 + w.x1) / 2, cy = (w.y0 + w.y1) / 2;
+    out.push(r.ch === "j" ? box(cx, cy, w.x1 - w.x0, 0.7, 1.4, "jersey") : box(cx, cy, 0.7, w.y1 - w.y0, 1.4, "jersey"));
   }
   // 경사로: 올라가는 방향으로 얇은 조각을 조금씩 높게 쌓는다 (물리는 상자만 알아서)
   for (const r of mergeCells(NEON_GRID, (ch) => "^v<>".includes(ch))) {

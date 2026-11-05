@@ -172,9 +172,8 @@ export class World3D {
       building: [photoMat("concrete_wall_008", { tint: 0x9aa0b8 }), 3],
       wall: [photoMat("concrete_block_wall"), 2],
       hedge: [photoMat("forest_leaves_02", { tint: 0x9fc29a }), 1.5],
-      prop: [photoMat("rusty_metal_02"), 2],
-      trunk: [photoMat("bark_brown_02"), 1],
-      fountain: [photoMat("patterned_concrete_pavers", { tint: 0xd8d8d8 }), 1],
+      tree: [photoMat("bark_brown_02"), 1],
+      jersey: [photoMat("concrete_floor_02", { tint: 0xe6e2da }), 1.5],
       step: [photoMat("concrete_floor_02"), 2],
       platform: [photoMat("concrete_floor_02"), 2],
       ramp: [photoMat("concrete_floor_02"), 2],
@@ -185,11 +184,38 @@ export class World3D {
     // 건물 모서리 네온 (톤 매핑 없이 밝게 → 블룸으로 번짐. 약한 색 성분은 1 아래로 둬야 흰색으로 안 잘림)
     const neonA = new THREE.LineBasicMaterial({ color: new THREE.Color(14, 0.6, 11), toneMapped: false });
     const neonB = new THREE.LineBasicMaterial({ color: new THREE.Color(0.3, 10, 14), toneMapped: false });
+    const planterBase = photoMat("concrete_block_wall", { tint: 0xc8c4bc });
+    const bush = photoMat("forest_leaves_02", { tint: 0xa8cc98 });
+    const basin = photoMat("patterned_concrete_pavers", { tint: 0xd8d8d8 });
+    const water = new THREE.MeshStandardMaterial({ color: 0x2c5a6e, roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.85 });
     BOXES_BY_MAP.NEON.forEach((b: Box, i) => {
       if (b.kind === "crate") { this.addCrate(g, b, planks); return; }
-      const width = Math.min(b.x1 - b.x0, b.y1 - b.y0);
-      const key = b.site ?? (b.kind === "prop" && width < 1 ? "trunk" : b.kind === "prop" && b.z1 < 1 ? "fountain" : b.kind);
-      const [mat, tile] = mats[key]!;
+      // 짐 더미: 나무 상자 2단 (가판대·하역장·창고)
+      if (b.kind === "cargo") {
+        const mid = (b.z0 + b.z1) / 2;
+        this.addCrate(g, { ...b, z1: mid }, planks);
+        this.addCrate(g, { ...b, z0: mid, x0: b.x0 + 0.15, x1: b.x1 - 0.15, y0: b.y0 + 0.15, y1: b.y1 - 0.15 }, planks);
+        return;
+      }
+      // 화단: 콘크리트 화분 위에 수풀 (충돌 높이 안에 모두 들어감)
+      if (b.kind === "planter") {
+        this.addBox(g, { ...b, z1: 0.7 }, planterBase, 1.5);
+        this.addBox(g, { ...b, x0: b.x0 + 0.1, x1: b.x1 - 0.1, y0: b.y0 + 0.1, y1: b.y1 - 0.1, z0: 0.7 }, bush, 1);
+        return;
+      }
+      // 분수: 돌 테두리 + 물 + 가운데 기둥
+      if (b.kind === "fountain") {
+        const t = 0.35;
+        for (const r of [{ y1: b.y0 + t }, { y0: b.y1 - t }, { x1: b.x0 + t }, { x0: b.x1 - t }]) this.addBox(g, { ...b, ...r }, basin, 1);
+        const pool = new THREE.Mesh(new THREE.PlaneGeometry(b.x1 - b.x0 - 2 * t, b.y1 - b.y0 - 2 * t), water);
+        pool.rotation.x = -Math.PI / 2;
+        pool.position.set((b.x0 + b.x1) / 2, b.z1 - 0.12, -(b.y0 + b.y1) / 2);
+        g.add(pool);
+        const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+        this.addBox(g, { ...b, x0: cx - 0.25, x1: cx + 0.25, y0: cy - 0.25, y1: cy + 0.25, z1: 1.6 }, basin, 1);
+        return;
+      }
+      const [mat, tile] = mats[b.site ?? b.kind]!;
       const mesh = this.addBox(g, b, mat, tile);
       if (b.kind === "building") {
         const line = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry), i % 2 ? neonA : neonB);
@@ -209,9 +235,12 @@ export class World3D {
       g.add(crown);
     }
     // 가로등 (Poly Haven 모델, 장식): 건물 벽에 붙여 세워 길을 막지 않는다. 전구는 스스로 빛남
+    // 위치: 시장 거리 양쪽 건물 벽, 광장 북쪽 건물 벽, 사이트 담장 안쪽 (모두 벽에서 0.4m)
+    const X = (c: number) => cellCenter(c, 0).x;
     const lamps: [number, number][] = [
-      [cellCenter(17, 18).x, 37.6], [cellCenter(33, 14).x, 29.6], [cellCenter(35, 12).x + 1.4, 24.4], [cellCenter(41, 11).x, 22.4],
-      [cellCenter(33, 21).x, 42.4], [cellCenter(25, 6).x, 13.6], [cellCenter(20, 16).x, 33], [cellCenter(28, 13).x, 26],
+      [X(34), 29.6], [X(40), 31.6], [X(36), 24.4], [X(41), 22.4], // 시장 거리
+      [X(16), 37.6], [X(19), 37.6], [92.4, cellCenter(0, 10).y], // 광장 둘레
+      [X(33), 42.4], [X(25), 13.6], [X(33), 13.6], // A 담장, B 담장
     ];
     model("street_lamp_01").then((proto) => {
       proto.traverse((o) => {

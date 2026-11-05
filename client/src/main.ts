@@ -3,6 +3,7 @@ import { type Body, angleToRad, groundHeightAt, makeBody, radToAngle, simulate, 
 import { HOUSES, MAPS, PHYS, SITES, SPAWNS, type SiteId, type TeamId, isNearHouse, isNearSite } from "../../shared/world";
 import { Minimap } from "./minimap";
 import { setHighQuality } from "./graphics";
+import { ObjectiveMarkers, damageDirection, damageNumber, feed, hitMarker } from "./hudfx";
 import { AIM, findAimTarget, inReach } from "../../shared/aim";
 // 서버와 같은 메시지 형식/규칙 수치를 그대로 쓴다 (타입은 빌드 때 지워진다)
 import type { Phase, PublicPlayer, RoomStateMessage, RoundEndReason, ServerMessage, WorkInfo } from "../../server/src/protocol";
@@ -229,7 +230,18 @@ $("startBtn").onclick = () => net.send({ t: "start_game" });
 document.querySelectorAll<HTMLButtonElement>("[data-map]").forEach((b) => {
   b.onclick = () => net.send({ t: "set_map", map: b.dataset.map });
 });
+// 직업 카드: 수치는 CLASSES 한 곳에서 (체력·사거리·속도 막대, 가장 큰 값 기준)
+const CLASS_ICON: Record<string, string> = { KNIGHT: "⚔️", ARCHER: "🏹", JAVELIN: "🔱" };
+const CLASS_DESC: Record<string, string> = { KNIGHT: "검과 방패 · 근접 · 빠른 발", ARCHER: "활 · 빠른 화살", JAVELIN: "창 · 느리지만 강한 한 방" };
 document.querySelectorAll<HTMLButtonElement>("[data-cls]").forEach((b) => {
+  const c = CLASSES[b.dataset.cls as keyof typeof CLASSES];
+  const all = Object.values(CLASSES);
+  const bar = (name: string, v: number, max: number, color: string) =>
+    `<span>${name}</span><div class="stat" style="color:${color}"><i style="width:${Math.round((v / max) * 100)}%"></i></div>`;
+  b.innerHTML = `${CLASS_ICON[b.dataset.cls!]} ${c.name}<small>${CLASS_DESC[b.dataset.cls!]} · 한 방 ${c.damage}</small><div class="stats">` +
+    bar("체력", c.maxHp, Math.max(...all.map((x) => x.maxHp)), "#4ade80") +
+    bar("사거리", c.range, Math.max(...all.map((x) => x.range)), "#60a5fa") +
+    bar("속도", c.speed, Math.max(...all.map((x) => x.speed)), "#fbbf24") + "</div>";
   b.onclick = () => net.send({ t: "set_class", cls: b.dataset.cls });
 });
 $("rematchBtn").onclick = () => net.send({ t: "rematch" });
@@ -364,10 +376,27 @@ function onServerError(code: string, message: string) {
   }
 }
 
+/** 기절·사망·부활 알림 (같은 라운드 안에서 상태가 바뀐 사람) */
+function announceStates(prev: RoomStateMessage, next: RoomStateMessage) {
+  const name = (id?: string) => {
+    const p = next.players.find((x) => x.id === id);
+    return p ? (p.id === myId ? "나" : p.nickname) : "?";
+  };
+  for (const p of next.players) {
+    const before = prev.players.find((x) => x.id === p.id)?.combat.state;
+    const now = p.combat.state;
+    if (before === now || !before) continue;
+    if (now === "DOWNED") feed($("feed"), `${name(lastHitBy.get(p.id))} ⚔ ${name(p.id)} 기절`, "down");
+    else if (now === "DEAD") feed($("feed"), `${name(p.id)} 사망`, "dead");
+    else if (before === "DOWNED" && now === "NORMAL") feed($("feed"), `${name(p.id)} 부활`, "up");
+  }
+}
+
 let prevPhase: Phase | null = null;
 let lastRoundKey = "";
 function applyRoomState(s: RoomStateMessage) {
   const prevMe = myInfo();
+  if (room && room.round === s.round) announceStates(room, s);
   // 단계/라운드가 바뀌었거나 내 상태(기절 등)가 바뀌었으면 서버 위치를 꼭 따른다
   const forceMe = !room || s.phase !== room.phase || s.round !== room.round;
   room = s;
@@ -448,8 +477,22 @@ function onShot(m: Extract<ServerMessage, { t: "shot" }>) {
   world.addArrow(m.by, m.origin, m.dir, m.at, m.speed, m.range, actors.get(m.by)?.info.cls === "JAVELIN");
 }
 
+/** 마지막으로 그 사람을 때린 사람 (기절 알림용) */
+const lastHitBy = new Map<string, string>();
+
 function onSwing(by: string, target: string | null) {
   const t = performance.now();
+  if (target) {
+    lastHitBy.set(target, by);
+    const victim = actors.get(target);
+    if (victim) damageNumber(victim.view.label, classOf(actors.get(by)?.info).damage);
+    if (by === myId) hitMarker($("crosshair"));
+    const m = me(), atk = actors.get(by);
+    if (target === myId && m && atk) {
+      const rel = Math.atan2(atk.body.y - m.body.y, atk.body.x - m.body.x) - world.yaw;
+      damageDirection($("dmgLayer"), Math.atan2(Math.sin(rel), Math.cos(rel)));
+    }
+  }
   if (classOf(actors.get(by)?.info).ranged) {
     // 화살이 맞음: 화살을 지우고 맞은 사람만 번쩍
     world.removeArrow(by);
@@ -656,13 +699,14 @@ function renderHud(now: number) {
       const enemy = other(mine.team);
       const prep = room.phase === "COUNTDOWN";
       const broken = room.sites ? SITE_IDS.find((s) => room!.sites![s].kind === "REPAIR") : undefined;
-      if (room.map === "NEON" && room.phase === "REPAIR" && broken) {
-        setText("hudRole", atk ? `⚔ ${broken} 건물 수리를 막으세요` : `🛡 부서진 ${broken} 건물을 고치세요`);
-      } else if (room.map === "NEON") {
-        setText("hudRole", `${room.attackingTeam}팀 공격 · ${other(room.attackingTeam)}팀 수비 — ` + (atk
-          ? (prep ? "⚔ 결계가 풀리면 A 또는 B 건물을 부수세요" : "⚔ A 또는 B 건물 하나를 부수세요")
-          : (prep ? "🛡 준비 시간: A/B 사이트로 가서 자리를 잡으세요" : "🛡 시간이 끝날 때까지 A·B 건물을 지키세요")));
-      } else setText("hudRole", atk ? `⚔ 공격팀 — ${enemy}팀 집을 부수세요` : `🛡 수비팀 — ${mine.team}팀 집을 지키세요`);
+      // 짧은 역할 배지: "⚔ 공격 · 할 일" (색 줄로 역할 구분)
+      const goal = room.map === "NEON"
+        ? room.phase === "REPAIR" && broken
+          ? (atk ? `${broken} 수리 막기` : `${broken} 건물 고치기`)
+          : prep ? (atk ? "결계가 풀리면 출발" : "A·B로 가서 자리 잡기") : (atk ? "A 또는 B 부수기" : "A·B 지키기")
+        : room.phase === "REPAIR" ? (atk ? "수리 막기" : "집 고치기") : (atk ? `${enemy}팀 집 부수기` : "우리 집 지키기");
+      setText("hudRole", `${atk ? "⚔ 공격" : "🛡 수비"} · ${goal}`);
+      $("hudRole").className = atk ? "atk" : "def";
     }
     const bad = !net.connected || net.unstable || net.rtt > CONFIG.PING_WARN_MS;
     setText("netStatus", net.connected ? `${bad ? "⚠ 불안정 · " : ""}ping ${Math.round(net.rtt)}ms${route ? " · " + route : ""} · ${Math.round(fps)}fps` : "⚠ 연결 끊김");
@@ -714,6 +758,25 @@ function renderSiteBars(now: number) {
     el.classList.toggle("hit", w.holders.length > 0);
     el.classList.toggle("dead", hp === 0);
   }
+}
+
+/** 화면 위 목표 표시: NEON = A/B 건물(수리 단계는 부서진 건물만), 기본 맵 = 부술/지킬 집 */
+const objectives = new ObjectiveMarkers($("objectives"));
+function renderObjectives() {
+  const show = !!room && (room.phase === "COUNTDOWN" || room.phase === "ATTACK" || room.phase === "REPAIR") && myNormal();
+  const list = [];
+  if (show && room!.map === "NEON" && room!.sites) {
+    for (const id of SITE_IDS) {
+      const w = room!.sites[id], b = SITES[id];
+      if (room!.phase === "REPAIR" && w.kind !== "REPAIR") continue;
+      list.push({ key: id, label: id, x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2, z: b.z1 + 1.2, color: id === "A" ? "#ffb02e" : "#2ee6ff", active: w.holders.length > 0 });
+    }
+  } else if (show) {
+    const t = other(room!.attackingTeam), h = HOUSES[t];
+    list.push({ key: "house", label: `${t}팀 집`, x: h.x, y: h.y, z: h.height + 1.5, color: t === "A" ? "#ff8a8a" : "#8ab0ff", active: !!work?.holders.length });
+  }
+  const m = me();
+  objectives.update(world.camera, list, m ? m.body : null);
 }
 
 /** 미니맵: 우리 팀 위치·방향만 (상대 위치는 숨김) */
@@ -1018,6 +1081,7 @@ function frame() {
 
   renderHud(now);
   renderMinimap(now);
+  renderObjectives();
   renderButtons(now);
   // 경기 후 방이 닫히기까지 남은 시간
   const note = $("matchCloseNote");

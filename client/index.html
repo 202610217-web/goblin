@@ -36,38 +36,45 @@
 
   <!-- 로비 -->
   <div id="lobby" class="panel hidden">
-    <h2>방 <span id="lobbyRoom"></span></h2>
-    <div class="teams">
-      <div class="team A"><h3>A팀</h3><div id="teamA"></div><button data-team="A" class="secondary">A팀으로</button></div>
-      <div class="team B"><h3>B팀</h3><div id="teamB"></div><button data-team="B" class="secondary">B팀으로</button></div>
+    <h2>방 <span id="lobbyRoom"></span> <small class="roomShare">친구에게 방 코드 <b id="lobbyRoom2"></b> 를 알려 주세요</small></h2>
+    <div class="lobbyGrid">
+      <section>
+        <div class="teams">
+          <div class="team A"><h3>A팀</h3><div id="teamA"></div><button data-team="A" class="secondary">A팀으로</button></div>
+          <div class="team B"><h3>B팀</h3><div id="teamB"></div><button data-team="B" class="secondary">B팀으로</button></div>
+        </div>
+        <p id="connNotice" class="hint small hidden"></p>
+        <div class="row"><button id="readyBtn">준비</button><button id="startBtn" class="hidden">게임 시작</button><button id="leaveBtn" class="secondary">나가기</button></div>
+        <p id="startHint" class="hint small"></p>
+      </section>
+      <section>
+        <h3 class="sub">맵</h3>
+        <div class="row" id="mapRow">
+          <button data-map="CLASSIC" class="secondary">🏠 기본 맵</button>
+          <button data-map="NEON" class="secondary">🌃 NEON DISTRICT</button>
+        </div>
+        <p id="mapHint" class="hint small"></p>
+        <h3 class="sub">혼자 연습</h3>
+        <div class="row practice">
+          <button id="addBotsBtn" class="secondary">🤖 더미로 채우기</button>
+          <button id="removeBotsBtn" class="secondary hidden">더미 빼기</button>
+          <button id="practiceBtn" class="secondary">연습 시작</button>
+        </div>
+        <p class="hint small">더미는 빈자리 연습 상대예요. 친구가 들어오면 자리를 비켜 줘요.</p>
+        <h3 class="sub">설정</h3>
+        <label class="check"><input type="checkbox" id="vibrateToggle" /> 맞으면 진동</label>
+        <label class="check"><input type="checkbox" id="gfxToggle" /> 고화질 그래픽 (선명한 그림자 · 빛 번짐)</label>
+      </section>
     </div>
-    <p id="connNotice" class="hint small hidden"></p>
-    <div class="row"><button id="readyBtn">준비</button><button id="leaveBtn" class="secondary">나가기</button></div>
-    <div class="row" id="mapRow">
-      <button data-map="CLASSIC" class="secondary">🏠 기본 맵</button>
-      <button data-map="NEON" class="secondary">🌃 NEON DISTRICT</button>
-    </div>
-    <p id="mapHint" class="hint small"></p>
-    <div class="row"><button id="startBtn" class="hidden">게임 시작</button></div>
-    <p id="startHint" class="hint small"></p>
-    <p class="hint">4명이 2대2로 모두 준비하면 방장(👑)이 시작해요. 친구에게 방 코드 <b id="lobbyRoom2"></b> 를 알려 주세요.</p>
-    <div class="row practice">
-      <button id="addBotsBtn" class="secondary">🤖 더미로 채우기</button>
-      <button id="removeBotsBtn" class="secondary hidden">더미 빼기</button>
-      <button id="practiceBtn" class="secondary">연습 경기 바로 시작</button>
-    </div>
-    <p class="hint small">더미는 빈자리를 채우는 연습 상대예요. 친구가 들어오면 더미가 자리를 비켜 줘요.</p>
-    <label class="check"><input type="checkbox" id="vibrateToggle" /> 맞으면 진동</label>
-    <label class="check"><input type="checkbox" id="gfxToggle" /> 고화질 그래픽 (선명한 그림자 · 빛 번짐)</label>
   </div>
 
   <!-- 직업 선택 (경기 시작 직후 5초) -->
   <div id="classSelect" class="panel hidden">
     <h2>직업 선택 · <span id="classLeft"></span>초</h2>
     <div class="row">
-      <button data-cls="KNIGHT" class="secondary classCard">⚔️ 기사<small>검과 방패 · 체력 150 · 빠른 발</small></button>
-      <button data-cls="ARCHER" class="secondary classCard">🏹 궁수<small>활 · 체력 70 · 빠른 화살</small></button>
-      <button data-cls="JAVELIN" class="secondary classCard">🔱 창던지기병<small>창 · 체력 100 · 느리지만 강한 창(45)</small></button>
+      <button data-cls="KNIGHT" class="secondary classCard"></button>
+      <button data-cls="ARCHER" class="secondary classCard"></button>
+      <button data-cls="JAVELIN" class="secondary classCard"></button>
     </div>
     <p id="classTeam" class="hint"></p>
   </div>
@@ -112,6 +119,10 @@
     <button id="scoreClose" class="secondary">닫기</button>
   </div>
 
+  <!-- 목표 표시 · 맞은 방향 · 알림 -->
+  <div id="objectives"></div>
+  <div id="dmgLayer"></div>
+  <div id="feed"></div>
   <!-- 조준점 -->
   <div id="crosshair" class="hidden"></div>
 
