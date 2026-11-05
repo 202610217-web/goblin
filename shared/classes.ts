@@ -33,10 +33,16 @@ export const STEALTH = { DURATION_MS: 10_000, COOLDOWN_MS: 15_000, BACKSTAB: 1.5
 /** 데스매치: 먼저 이 킬 수에 닿은 팀이 승리 */
 export const KILL_TARGET = 15;
 
-/** 스킬 버튼: 기사 = 10초 이속 증가(쿨 15초), 궁수 = 10초 공속 증가(쿨 20초). 없는 직업은 버튼이 숨는다 */
-export const SKILLS: Partial<Record<ClassId, { durationMs: number; cooldownMs: number; speedMul?: number; attackCooldownMs?: number }>> = {
-  KNIGHT: { durationMs: 10_000, cooldownMs: 15_000, speedMul: 1.3 },
-  ARCHER: { durationMs: 10_000, cooldownMs: 20_000, attackCooldownMs: 700 },
+/**
+ * 스킬 버튼: 기사 = 10초 이속 증가(쿨 15초), 궁수 = 10초 공속 증가(쿨 20초),
+ * 창던지기병 = 10초 안에 던지는 다음 창 한 발이 맞은 적을 2초 동안 50% 느리게(쿨 15초). 없는 직업은 버튼이 숨는다
+ */
+export const SKILLS: Partial<Record<ClassId, {
+  name: string; durationMs: number; cooldownMs: number; speedMul?: number; attackCooldownMs?: number; slowMs?: number; slowMul?: number;
+}>> = {
+  KNIGHT: { name: "질주", durationMs: 10_000, cooldownMs: 15_000, speedMul: 1.3 },
+  ARCHER: { name: "속사", durationMs: 10_000, cooldownMs: 20_000, attackCooldownMs: 700 },
+  JAVELIN: { name: "발 묶기", durationMs: 10_000, cooldownMs: 15_000, slowMs: 2_000, slowMul: 0.5 },
 };
 
 /** 지금 공격 쿨다운 (궁수 스킬 중이면 짧아짐). 서버 판정과 화면이 같은 값을 쓴다 */

@@ -131,6 +131,13 @@ const ATTACK_REJECT_TEXT: Record<string, string> = {
 /** 이 플레이어의 직업 수치 */
 const cls = (p: { cls?: ClassId }) => CLASSES[p.cls ?? "KNIGHT"];
 const maxHp = (p: { cls?: ClassId }) => cls(p).maxHp;
+/** 지금 걷는 속도: 직업 속도 × 기사 질주 × 발 묶는 창 */
+function speedOf(p: { cls?: ClassId; c: Combat }, now: number): number {
+  const sk = SKILLS[p.cls ?? "KNIGHT"];
+  const boost = sk?.speedMul && now < (p.c.skillUntil ?? 0) ? sk.speedMul : 1;
+  const slow = now < (p.c.slowUntil ?? 0) ? SKILLS.JAVELIN!.slowMul! : 1;
+  return cls(p).speed * boost * slow;
+}
 /** 지금 공격 쿨다운 (궁수 스킬 중이면 짧음) */
 const cooldownOf = (p: { cls?: ClassId; c: Combat }, now: number) => attackCooldownMs(p.cls ?? "KNIGHT", p.c.skillUntil, now);
 
@@ -405,9 +412,8 @@ export class GameRoom extends DurableObject<Env> {
         if (player.c.skillUntil === before) return this.sendError(ws, "cannot_skill", "스킬 쿨타임이에요");
         if (skill.speedMul) {
           // 기사: 지금 위치에서 빠른 걸음으로 바꾸고, 끝나는 시각에 되돌린다 (물리가 몸 상태 v로 계산)
-          player.body = roundBody({ ...simulate(player.body, now), v: cls(player).speed * skill.speedMul });
+          this.applySpeed(player, now);
           st.deadlines = upsertDeadline(st.deadlines, { kind: "skill", key: player.id, at: player.c.skillUntil! });
-          this.broadcastMove(player);
         }
         this.markDirty();
         await this.commit();
@@ -587,12 +593,9 @@ export class GameRoom extends DurableObject<Env> {
         } else if (d.kind === "bot") {
           this.botsThink(d.at);
         } else if (d.kind === "skill") {
-          // 기사 이속 증가 끝: 원래 걷는 속도로 (부활하면서 이미 원래 속도면 그대로)
-          const p = st.players.find((x) => x.id === d.key);
-          if (p && p.body.v !== cls(p).speed) {
-            p.body = roundBody({ ...simulate(p.body, d.at), v: cls(p).speed });
-            this.broadcastMove(p);
-          }
+          // 기사 질주 / 발 묶는 창이 끝남: 그 시각의 걷는 속도로 (key = 플레이어 id, 느려짐은 "slow:" + id)
+          const p = st.players.find((x) => x.id === d.key.replace("slow:", ""));
+          if (p) this.applySpeed(p, d.at);
         } else if (d.kind === "respawn") {
           this.onRespawnDue(d.key, d.at);
         } else if (d.kind === "reconnect") {
@@ -683,8 +686,19 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   /** 화살: 쏜 걸 알리고 50ms마다 지나간 구간을 판정. 메모리 타이머만 쓰고 저장하지 않는다 (0.4초면 끝남) */
+  /** 걷는 속도가 바뀌었으면 at 시각 위치에서 새 속도로 바꾸고 알린다 */
+  private applySpeed(p: PlayerRecord, at: number) {
+    const v = speedOf(p, at);
+    if ((p.body.v ?? PHYS.SPEED) === v) return;
+    p.body = roundBody({ ...simulate(p.body, at), v });
+    this.broadcastMove(p);
+  }
+
   private fireArrow(shooter: PlayerRecord, me: Body, yaw: number, pitch: number, now: number) {
     const arrow = makeArrow(me, yaw, pitch, now, cls(shooter).proj);
+    // 창던지기병 발 묶기: 켜 둔 동안 던진 다음 창 한 발에만 붙고, 던지면 스킬이 끝난다
+    const slow = SKILLS[shooter.cls ?? "KNIGHT"]?.slowMs !== undefined && now < (shooter.c.skillUntil ?? 0);
+    if (slow) shooter.c = { ...shooter.c, skillUntil: now };
     this.broadcast({ t: "shot", by: shooter.id, ...arrow });
     let from = now;
     const step = async () => {
@@ -694,6 +708,11 @@ export class GameRoom extends DurableObject<Env> {
       const r = arrowSegmentHit(arrow, from, to, st.players.filter((p) => p.team !== shooter.team && isHittable(p.c, to)));
       if (r.hit) {
         this.landHit(shooter.id, r.hit, to, cls(shooter).damage);
+        if (slow && r.hit.c.state === "NORMAL") {
+          r.hit.c = { ...r.hit.c, slowUntil: to + SKILLS.JAVELIN!.slowMs! };
+          this.applySpeed(r.hit, to);
+          st.deadlines = upsertDeadline(st.deadlines, { kind: "skill", key: "slow:" + r.hit.id, at: r.hit.c.slowUntil! });
+        }
         await this.commit();
         this.broadcastRoomState(to);
       } else if (!r.stopped) {
@@ -939,6 +958,7 @@ export class GameRoom extends DurableObject<Env> {
         attackReadyAt: p.c.lastAttackAt + cooldownOf(p, Date.now()),
         skillUntil: p.c.skillUntil,
         skillReadyAt: p.c.skillReadyAt,
+        slowUntil: p.c.slowUntil,
         stealthUntil: p.c.stealthUntil,
         stealthReadyAt: p.c.stealthReadyAt,
       },

@@ -106,6 +106,36 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     host.stop();
   });
 
+  it("창던지기병 발 묶기: 켜고 던진 다음 창 한 발에 맞은 적은 2초 동안 절반 속도, 그다음 창은 보통", async () => {
+    const host = new HostRoom("SLOW", { DEBUG_COMMANDS: "true" });
+    const a = fakePeer(), b = fakePeer();
+    host.addPeer(a, "HOST"); host.addPeer(b, "P2P");
+    await tick();
+    a.push({ t: "join", nickname: "기사" }); b.push({ t: "join", nickname: "창병" });
+    await tick(5);
+    a.push({ t: "start_practice" }); await tick(5);
+    b.push({ t: "set_class", cls: "JAVELIN" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "COUNTDOWN" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "PLAY" }); await tick(5);
+    const aId = last(a, "welcome").playerId, bId = last(b, "welcome").playerId;
+    const me = (id: string) => last(a, "room_state").players.find((p: any) => p.id === id);
+    b.push({ t: "debug_teleport", x: 10, y: 2 }); await tick(5);
+    const spear = makeArrow(makeBody(10, 2, 0), 0, 0.1, 0, CLASSES.JAVELIN.proj);
+    a.push({ t: "debug_teleport", x: 10 + spear.dir.x * 5, y: 2 + spear.dir.y * 5 }); await tick(5);
+    b.push({ t: "skill" }); await tick(5);
+    expect(me(bId).combat.skillUntil).toBeGreaterThan(Date.now());
+    b.push({ t: "attack", yaw: 0, pitch: 0.1 }); await tick(5);
+    expect(me(bId).combat.skillUntil).toBeLessThanOrEqual(Date.now()); // 한 발 쓰면 끝
+    await tick(400);
+    expect(last(a, "swing")).toMatchObject({ target: aId });
+    expect(me(aId).combat.slowUntil).toBeGreaterThan(Date.now());
+    expect(me(aId).body.v).toBeCloseTo(CLASSES.KNIGHT.speed * 0.5, 2);
+    await tick(2_100); // 2초 뒤 원래 속도
+    expect(last(a, "move")).toMatchObject({ id: aId });
+    expect(last(a, "move").body.v).toBeCloseTo(CLASSES.KNIGHT.speed, 2);
+    host.stop();
+  });
+
   it("고블린이 등 뒤에서 찌르면 1.5배 (swing에 실제 데미지), 앞에서는 기본 데미지", async () => {
     const host = new HostRoom("BACK", { DEBUG_COMMANDS: "true" });
     const a = fakePeer(), b = fakePeer();

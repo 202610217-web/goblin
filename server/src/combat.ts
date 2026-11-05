@@ -23,6 +23,8 @@ export interface Combat {
   /** 직업 스킬이 끝나는 시각 / 다시 쓸 수 있는 시각 */
   skillUntil?: number;
   skillReadyAt?: number;
+  /** 창던지기병 발 묶는 창에 맞아 느려진 상태가 끝나는 시각 */
+  slowUntil?: number;
 }
 
 /** 경기 시작 시 상태 */

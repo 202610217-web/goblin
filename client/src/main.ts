@@ -646,6 +646,7 @@ function renderTeamPanels(now: number) {
 function statusText(p: PublicPlayer, now: number): string {
   if (p.conn === "RECONNECTING") return "재접속 중";
   if (p.combat.state === "DEAD") return p.combat.respawnAt && movable() ? `부활 ${Math.max(0, Math.ceil((p.combat.respawnAt - now) / 1000))}초` : "사망";
+  if (now < (p.combat.slowUntil ?? 0)) return "느려짐";
   if (now < (p.combat.stealthUntil ?? 0)) return `은신 ${Math.ceil((p.combat.stealthUntil! - now) / 1000)}초`;
   if (p.id === myId && now < (p.combat.stealthReadyAt ?? 0)) return `은신 대기 ${Math.ceil((p.combat.stealthReadyAt! - now) / 1000)}초`;
   return "";
@@ -702,7 +703,7 @@ function renderButtons(now: number) {
     const scd = Math.max(0, (mine.combat.skillReadyAt ?? 0) - now);
     $("skillBtn").classList.toggle("on", active > 0);
     $("skillBtn").classList.toggle("cooling", active === 0 && (scd > 0 || !movable()));
-    setText("skillLabel", active > 0 ? `${Math.ceil(active / 1000)}초` : scd > 0 ? (scd / 1000).toFixed(1) : mine.cls === "KNIGHT" ? "질주" : "속사");
+    setText("skillLabel", active > 0 ? `${Math.ceil(active / 1000)}초` : scd > 0 ? (scd / 1000).toFixed(1) : skill.name);
     $("skillCd").style.height = `${active > 0 ? 0 : (scd / skill.cooldownMs) * 100}%`;
   }
 }
