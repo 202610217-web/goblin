@@ -56,8 +56,8 @@ export const ULT_PER_DAMAGE = 0.5;
  * - 기사 하늘 검(sword): 앞쪽(양옆 30°) range m 안의 적 한 명에게 하늘에서 큰 칼을 내리꽂는다
  * - 궁수 화살비(rain): 조준점(최대 range m) 반경 radius m에 delayMs 뒤 화살이 쏟아져 안의 적 모두에게 데미지
  * - 창던지기병 거대 창(spear): 크고 빠른 창 한 발 (range m), 맞은 적은 slowMs 동안 slowMul 속도
- * - 고블린 연막탄(smoke): 내 자리에 반경 radius m 연기 durationMs 동안. 연기 안의 적은 앞이 잘 안 보이고,
- *   연기 안에서 우리 팀이 공격해도 은신이 안 풀린다
+ * - 고블린 연막탄(smoke): 내 자리에 반경 radius m 연기 durationMs 동안. 쓴 팀에게는 연기가 옅어 안이 잘 보이고,
+ *   상대 팀에게는 짙은 연기라 그 안에 있는 사람이 안 보인다
  */
 export const ULTS: Partial<Record<ClassId, {
   name: string; kind: "sword" | "rain" | "spear" | "smoke"; damage: number; range: number;

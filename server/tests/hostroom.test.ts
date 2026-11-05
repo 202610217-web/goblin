@@ -185,7 +185,7 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     host.stop();
   });
 
-  it("궁극기 3종: 궁수 화살비(1초 뒤 반경 3m 모두 30), 창병 거대 창(70 + 1초 20% 속도), 고블린 연막(안에서 공격해도 은신 유지)", async () => {
+  it("궁극기 3종: 궁수 화살비(1초 뒤 반경 3m 모두 30), 창병 거대 창(70 + 1초 20% 속도), 고블린 연막(쓴 팀 정보와 함께 방송)", async () => {
     const host = new HostRoom("ULT3", { DEBUG_COMMANDS: "true" });
     const a = fakePeer(), b = fakePeer();
     host.addPeer(a, "HOST"); host.addPeer(b, "P2P");
@@ -223,7 +223,7 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     await tick(400);
     expect(me(bId).combat.hp).toBe(hp0 - 70);
     expect(me(bId).body.v).toBeCloseTo(CLASSES.KNIGHT.speed * 0.2, 2);
-    // 연막: 내 자리에 생기고, 안에서 공격해도 은신이 안 풀림
+    // 연막: 내 자리에 생기고, 어느 팀 연막인지 화면에 알린다 (보이고 안 보이고는 화면이 팀으로 정함)
     rec(aId).cls = "GOBLIN";
     rec(aId).c.stealthReadyAt = 0; rec(aId).c.stealthUntil = 0; rec(aId).c.lastAttackAt = 0;
     full();
@@ -231,7 +231,7 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     expect(last(a, "room_state").smokes).toMatchObject([{ team: me(aId).team, radius: 4 }]);
     a.push({ t: "skill" }); await tick(5);
     a.push({ t: "attack", yaw: 0, pitch: 0.3 }); await tick(5);
-    expect(me(aId).combat.stealthUntil).toBeGreaterThan(Date.now());
+    expect(me(aId).combat.stealthUntil).toBeLessThanOrEqual(Date.now()); // 연막 안이어도 공격하면 은신이 풀림 (예전 규칙 뺌)
     host.stop();
   });
 

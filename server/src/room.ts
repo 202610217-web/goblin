@@ -687,8 +687,7 @@ export class GameRoom extends DurableObject<Env> {
   /** 타격: 조준 광선(yaw/pitch)으로 맞은 상대를 찾아 체력 처리. 검증은 부르는 쪽에서 한다 */
   private performAttack(player: PlayerRecord, yaw: number, pitch: number, now: number): PlayerRecord | null {
     const st = this.state!;
-    // 공격하면 모습이 드러난다 (자기 팀 연막 안이면 유지)
-    player.c = this.inOwnSmoke(player, now) ? { ...player.c, lastAttackAt: now } : endStealth({ ...player.c, lastAttackAt: now }, now);
+    player.c = endStealth({ ...player.c, lastAttackAt: now }, now); // 공격하면 모습이 드러난다
     const me = simulate(player.body, now);
     if (cls(player).ranged) {
       this.fireArrow(player, me, yaw, pitch, now);
@@ -763,10 +762,10 @@ export class GameRoom extends DurableObject<Env> {
     }, ult.delayMs);
   }
 
-  /** 지금 자기 팀 연막 안에 있는지 (연막 안에서는 공격해도 은신 유지) */
-  private inOwnSmoke(p: PlayerRecord, now: number): boolean {
+  /** viewer 팀에게 p가 연막에 가려 안 보이는지 (viewer 팀이 쓴 게 아닌 연막 안) */
+  private hiddenBySmoke(p: PlayerRecord, viewer: Team, now: number): boolean {
     const b = simulate(p.body, now);
-    return (this.state!.smokes ?? []).some((s) => s.team === p.team && s.until > now && Math.hypot(b.x - s.x, b.y - s.y) <= s.radius);
+    return (this.state!.smokes ?? []).some((s) => s.team !== viewer && s.until > now && Math.hypot(b.x - s.x, b.y - s.y) <= s.radius);
   }
 
   /** 화살/창. ult = 거대 창 (궁극기: 더 멀리·세게, 게이지 안 채움) */
@@ -822,7 +821,8 @@ export class GameRoom extends DurableObject<Env> {
     for (const bot of st.players) {
       if (!bot.bot || !bot.plan) continue;
       const me = seen(bot);
-      const enemies = st.players.filter((p) => p.team !== bot.team && now >= (p.c.stealthUntil ?? 0)).map(seen); // 은신한 상대는 못 본다
+      // 은신한 상대, 상대 팀 연막 안에 있는 상대는 못 본다
+      const enemies = st.players.filter((p) => p.team !== bot.team && now >= (p.c.stealthUntil ?? 0) && !this.hiddenBySmoke(p, bot.team, now)).map(seen);
       const canAttack = !checkAttack(bot.c, st.phase, now, cls(bot).cooldownMs) && now - bot.c.lastAttackAt >= BOT_ATTACK_COOLDOWN_MS;
       const d = decide(me, bot.plan, enemies, { canAttack, proj: cls(bot).proj ?? null });
       if (d.attack) {

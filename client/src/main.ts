@@ -766,6 +766,7 @@ function frame() {
   }
   const now = net.serverNow();
   const m = me();
+  const smokes = (inGame() && room?.smokes) || [];
 
   input.enabled = !!m && inGame() && myNormal();
   input.update(dt);
@@ -857,7 +858,9 @@ function frame() {
     // shortcut: 숨기기는 화면에서만 (위치는 상대에게도 전송됨), 조작한 클라이언트를 막아야 하면 서버가 위치 전송을 거른다
     const stealth = state === 0 && now < (c.stealthUntil ?? 0);
     const enemy = !!m && a.team !== m.team;
-    a.view.hidden = stealth && enemy;
+    // 연막: 우리 팀이 쓴 게 아닌 연막 안의 상대는 안 보인다 (쓴 팀은 안이 보임)
+    const smoked = enemy && smokes.some((s) => s.team !== m!.team && s.until > now && Math.hypot(a.body.x - s.x, a.body.y - s.y) <= s.radius);
+    a.view.hidden = (stealth || smoked) && enemy;
     // 상대 이름표·체력은 엄폐물에 가리지 않고 보일 때만
     a.view.labelHidden = enemy && !world.canSee(x, y, z + 1.4);
     a.view.update(x, y, z, a.face, groundHeightAt(x, y, z), state, now < c.invulnUntil, a.info.conn === "RECONNECTING" || stealth, t, !!a.body.k);
@@ -867,16 +870,12 @@ function frame() {
       a.view.nearCamera = world.updateCamera(x, y, z, dt) < CONFIG.CAMERA_FADE_RATIO;
     }
     else a.view.nearCamera = false;
-    if (m && a.team !== m.team && c.state === "NORMAL" && now >= c.invulnUntil && !stealth) enemyBuf.push(a);
+    if (m && a.team !== m.team && c.state === "NORMAL" && now >= c.invulnUntil && !stealth && !smoked) enemyBuf.push(a);
   }
   if (!watch) world.updateCamera(24, 14 - 8, 0); // 입장 전: 맵 가운데를 비춤
   world.updateArrows(now);
   world.updateUlts(now);
-  // 고블린 연막: 연기 그리기 + 적 연막 안에 들어가면 화면이 뿌옇게
-  const smokes = (inGame() && room?.smokes) || [];
-  world.setSmokes(smokes, now);
-  const mb = me()?.body, myTeam = me()?.team;
-  $("smokeFog").classList.toggle("hidden", !mb || !smokes.some((s) => s.team !== myTeam && s.until > now && Math.hypot(mb.x - s.x, mb.y - s.y) <= s.radius));
+  world.setSmokes(smokes, now, m?.team); // 고블린 연막: 우리 팀 것은 옅게, 상대 것은 짙게
   world.render();
   for (const a of actors.values()) a.view.placeLabel(world.camera, w, h);
 

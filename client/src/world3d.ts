@@ -592,7 +592,7 @@ export class World3D {
 
   // ---------- 고블린 연막: 회색 연기 덩어리 (room_state의 목록대로 만들고 지운다) ----------
   private smokes = new Map<string, { g: THREE.Group; mat: THREE.MeshLambertMaterial; until: number }>();
-  setSmokes(list: { x: number; y: number; z: number; radius: number; until: number }[], serverNow: number) {
+  setSmokes(list: { team: TeamId; x: number; y: number; z: number; radius: number; until: number }[], serverNow: number, myTeam?: TeamId) {
     const keep = new Set<string>();
     for (const s of list) {
       const key = `${s.x},${s.y},${s.until}`;
@@ -613,7 +613,8 @@ export class World3D {
         this.smokes.set(key, e);
       }
       const left = s.until - serverNow;
-      e.mat.opacity = 0.8 * Math.min(1, left / 800);
+      // 쓴 팀에게는 옅게(안이 보임), 상대 팀에게는 거의 불투명하게
+      e.mat.opacity = (s.team === myTeam ? 0.18 : 0.96) * Math.min(1, left / 800);
       e.g.rotation.y += 0.002;
     }
     for (const [key, e] of this.smokes) {
