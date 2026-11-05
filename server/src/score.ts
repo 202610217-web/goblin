@@ -9,7 +9,8 @@ export type RoundEndReason =
   | "repair_success" // 1분 안에 수리 완료
   | "repair_fail" // 수리 시간 초과
   | "attackers_wiped" // ATTACK 중 공격팀 전멸
-  | "defenders_wiped"; // REPAIR 중 수비팀 전멸
+  | "defenders_wiped" // REPAIR 중 수비팀 전멸
+  | "site_destroyed"; // NEON: A 또는 B 건물 파괴
 
 export type Score = Record<Team, number>;
 
@@ -41,6 +42,7 @@ export function roundWinner(reason: RoundEndReason, attackingTeam: Team): Team {
       return other(attackingTeam);
     case "repair_fail":
     case "defenders_wiped":
+    case "site_destroyed":
       return attackingTeam;
   }
 }

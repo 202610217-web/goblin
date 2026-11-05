@@ -7,6 +7,8 @@ export type { WorkState };
 import type { Combat } from "./combat";
 import { type ClassId, isClassId } from "../../shared/classes";
 import type { Vec3 } from "../../shared/aim";
+import { type MapId, type SiteId, isMapId } from "../../shared/world";
+export type { MapId, SiteId };
 export type { ClassId };
 import type { RoundEndReason, RoundRecord, Score } from "./score";
 export type { RoundEndReason, RoundRecord, Score };
@@ -44,6 +46,8 @@ export type ClientMessage =
   | { t: "start_practice" }
   /** 로비: 방장이 게임 시작 (4명·2대2·모두 준비일 때) → 직업 선택 5초 */
   | { t: "start_game" }
+  /** 로비: 방장이 맵 고르기 */
+  | { t: "set_map"; map: MapId }
   /** 직업 선택 단계에서 내 직업 고르기 */
   | { t: "set_class"; cls: ClassId }
   | { t: "debug_phase"; phase: Phase } // 개발용 강제 단계 전환 (DEBUG_COMMANDS=true 일 때만)
@@ -89,8 +93,14 @@ export interface RoomStateMessage {
   /** 현재 단계 종료 시각 (서버 기준 ms). 제한 없으면 null */
   phaseEndsAt: number | null;
   work: WorkInfo;
-  /** ROUND_END 동안: 방금 라운드의 승자와 이유 */
-  roundEnd: { winner: Team; reason: RoundEndReason } | null;
+  /** ROUND_END 동안: 방금 라운드의 승자와 이유 (site = 부서진 사이트) */
+  roundEnd: { winner: Team; reason: RoundEndReason; site?: SiteId } | null;
+  /** 맵 */
+  map: MapId;
+  /** NEON: A/B 사이트 건물 작업 상태 (체력 = 1 - 진행률). 기본 맵은 null */
+  sites: Record<SiteId, WorkInfo> | null;
+  /** 준비 시간 결계가 사라지는 서버 시각 (결계가 없으면 null) */
+  barrierUntil: number | null;
   /** 팀 점수, 라운드별 기록 */
   score: Score;
   history: RoundRecord[];
@@ -163,7 +173,7 @@ export type ServerMessage =
   /** 궁수가 쐈을 때 (화면이 같은 화살을 그림). at = 쏜 서버 시각. 맞으면 swing(target)이 따로 온다 */
   | { t: "shot"; by: string; origin: Vec3; dir: Vec3; at: number }
   /** 집 작업 상태가 바뀌었을 때 (시작/중단/완료)만 보낸다 */
-  | { t: "work"; work: WorkInfo; serverTime: number }
+  | { t: "work"; work: WorkInfo; sites: Record<SiteId, WorkInfo> | null; serverTime: number }
   | { t: "error"; code: ErrorCode; message: string };
 
 const isTime = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
@@ -220,6 +230,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return { t: "start_practice" };
     case "start_game":
       return { t: "start_game" };
+    case "set_map":
+      return isMapId(m.map) ? { t: "set_map", map: m.map } : null;
     case "set_class":
       return isClassId(m.cls) ? { t: "set_class", cls: m.cls } : null;
     case "debug_teleport":

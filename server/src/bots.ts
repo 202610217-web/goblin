@@ -5,7 +5,8 @@ import { AIM, findAimTarget, inReach } from "../../shared/aim";
 import { ARROW } from "../../shared/classes";
 import { arrowSegmentHit, makeArrow } from "../../shared/arrow";
 import { type Body, radToAngle, withAngle } from "../../shared/sim";
-import { isNearHouse } from "../../shared/world";
+import { type MapId, type SiteId, isNearHouse, isNearSite } from "../../shared/world";
+import { COLS, NEON_GRID, NEON_SPAWNS, ROWS, cellAt, cellCenter, isFloorCell } from "../../shared/neon";
 import { BOT_CHASE_RANGE_ATTACKER, BOT_CHASE_RANGE_DEFENDER } from "./constants";
 import type { Combat } from "./combat";
 import type { Phase, Team } from "./protocol";
@@ -17,6 +18,8 @@ export interface BotPlan {
   waypoints: Point[];
   idx: number;
   hold: boolean;
+  /** NEON: 목표 사이트 (작업 거리 판정용) */
+  site?: SiteId;
 }
 
 /** 맵 가장자리 두 길 (가운데 단상/벽/상자를 피함) */
@@ -40,8 +43,16 @@ const GUARD: Record<Team, { x: number; ys: [number, number] }> = {
  * - REPAIR 공격팀: 상대 집 앞으로 가서 수리를 막기(싸우기)
  * slot = 팀 안에서 몇 번째 더미인지 (0/1, 길을 나눠 쓴다)
  */
-export function planFor(team: Team, phase: Phase, attackingTeam: Team, slot: number): BotPlan {
+export function planFor(team: Team, phase: Phase, attackingTeam: Team, slot: number, map: MapId = "CLASSIC", from?: Point): BotPlan {
   const s = slot % 2;
+  if (map === "NEON") {
+    // 0번은 A, 1번은 B 사이트. 공격팀은 준비 시간에는 대기, 공격 단계에 건물 앞까지 가서 부순다. 수비팀은 그 건물 앞을 지킨다
+    const site: SiteId = s === 0 ? "A" : "B";
+    const attacker = team === attackingTeam;
+    if (attacker && phase !== "ATTACK") return { waypoints: [], idx: 0, hold: false, site };
+    const start = from ?? NEON_SPAWNS[attacker ? "atk" : "def"][s]!;
+    return { waypoints: neonPath(start, site), idx: 0, hold: attacker, site };
+  }
   const attacker = team === attackingTeam;
   const enemy: Team = team === "A" ? "B" : "A";
   if (attacker) {
@@ -79,6 +90,44 @@ export interface BotDecision {
   advanced?: boolean;
   /** 상대가 가까이 있는지 (다음 생각을 더 빨리) */
   enemyNear: boolean;
+}
+
+/**
+ * NEON 길 찾기: 바닥 칸 격자에서 사이트 건물 바로 앞 칸까지 가장 짧은 길 (4방향).
+ * 꺾이는 칸 가운데만 남긴다 (칸 가운데끼리 직선이면 벽에 걸리지 않음)
+ */
+export function neonPath(from: Point, site: SiteId): Point[] {
+  const start = cellAt(from.x, from.y);
+  if (!start) return [];
+  const key = (c: number, s: number) => s * COLS + c;
+  const prev = new Map<number, number>([[key(start.c, start.s), -1]]);
+  const q = [start];
+  let goal: { c: number; s: number } | null = null;
+  while (q.length && !goal) {
+    const cur = q.shift()!;
+    for (const [dc, ds] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const c = cur.c + dc, s = cur.s + ds;
+      if (c < 0 || s < 0 || c >= COLS || s >= ROWS || prev.has(key(c, s)) || !isFloorCell(NEON_GRID[s]![c]!)) continue;
+      prev.set(key(c, s), key(cur.c, cur.s));
+      const p = cellCenter(c, s);
+      if (isNearSite(site, p.x, p.y, 0)) { goal = { c, s }; break; }
+      q.push({ c, s });
+    }
+  }
+  if (!goal) return [];
+  const cells: { c: number; s: number }[] = [];
+  for (let k = key(goal.c, goal.s); k !== -1; k = prev.get(k)!) cells.unshift({ c: k % COLS, s: Math.floor(k / COLS) });
+  const out: Point[] = [];
+  for (let i = 1; i < cells.length; i++) {
+    const a = cells[i - 1]!, b = cells[i]!, n = cells[i + 1];
+    if (!n || (n.c - b.c) !== (b.c - a.c) || (n.s - b.s) !== (b.s - a.s)) out.push(cellCenter(b.c, b.s));
+  }
+  return out;
+}
+
+/** 계획의 목표(집 또는 사이트 건물) 작업 거리 안인지 */
+function nearGoal(plan: BotPlan, attackingTeam: Team, b: Body): boolean {
+  return plan.site ? isNearSite(plan.site, b.x, b.y, b.z) : isNearHouse(attackingTeam === "A" ? "B" : "A", b.x, b.y, b.z);
 }
 
 const ARRIVE = 0.5;
@@ -135,9 +184,8 @@ export function decide(
   // 마지막 지점(집 앞)에 도착했고 작업할 차례면, 옆에 적이 있어도 먼저 작업 시작
   const wpNow = plan.waypoints[plan.idx];
   if (plan.hold && wpNow && plan.idx === plan.waypoints.length - 1 && dist(bot.body, wpNow) <= ARRIVE) {
-    const house = ctx.attackingTeam === "A" ? "B" : "A";
     const myTurn = (ctx.phase === "ATTACK" && attacker) || (ctx.phase === "REPAIR" && !attacker);
-    if (myTurn && isNearHouse(house, bot.body.x, bot.body.y, bot.body.z)) return { angle: -1, holdStart: true, enemyNear };
+    if (myTurn && nearGoal(plan, ctx.attackingTeam, bot.body)) return { angle: -1, holdStart: true, enemyNear };
   }
 
   // 궁수 더미: 10m 안 적이 보이면 그 자리에서 쏜다
@@ -163,8 +211,7 @@ export function decide(
       return { angle: angleTo(bot.body, plan.waypoints[plan.idx]!), advanced: true, enemyNear };
     }
     // 마지막 지점: 작업할 차례면 집 작업 시작
-    const target = ctx.attackingTeam === "A" ? "B" : "A";
-    const canWork = plan.hold && isNearHouse(target, bot.body.x, bot.body.y, bot.body.z) &&
+    const canWork = plan.hold && nearGoal(plan, ctx.attackingTeam, bot.body) &&
       ((ctx.phase === "ATTACK" && attacker) || (ctx.phase === "REPAIR" && !attacker));
     return { angle: -1, holdStart: canWork, enemyNear };
   }

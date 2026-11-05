@@ -1,8 +1,8 @@
 // 방 단계(페이즈) 상태 머신 (순수 함수)
 // LOBBY → COUNTDOWN → ATTACK → (REPAIR) → ROUND_END → 다음 라운드 COUNTDOWN ... → MATCH_END
-import { ATTACK_MS, CLASS_SELECT_MS, COUNTDOWN_MS, FIRST_ATTACKING_TEAM, MAX_PER_TEAM, MAX_PLAYERS, REPAIR_MS, ROUND_END_MS } from "./constants";
+import { ATTACK_MS, CLASS_SELECT_MS, COUNTDOWN_MS, PREP_MS, FIRST_ATTACKING_TEAM, MAX_PER_TEAM, MAX_PLAYERS, REPAIR_MS, ROUND_END_MS } from "./constants";
 import { countTeams } from "./lobby";
-import type { ConnState, Phase, Team } from "./protocol";
+import type { ConnState, MapId, Phase, Team } from "./protocol";
 
 export interface PhaseState {
   phase: Phase;
@@ -11,6 +11,8 @@ export interface PhaseState {
   attackingTeam: Team;
   /** 이 단계가 끝나는 서버 시각 (ms). 시간 제한 없는 단계는 null */
   phaseEndsAt: number | null;
+  /** 맵 (예전에 저장된 방에는 없음 → 기본 맵) */
+  map?: MapId;
 }
 
 /** 단계별 제한 시간. 없는 단계는 시간 제한 없음 */
@@ -28,7 +30,7 @@ export function initialPhase(): PhaseState {
 
 /** 해당 단계로 들어간다 (종료 시각 계산) */
 export function enterPhase(s: PhaseState, phase: Phase, now: number): PhaseState {
-  const d = DURATION[phase];
+  const d = phase === "COUNTDOWN" && s.map === "NEON" ? PREP_MS : DURATION[phase];
   return { ...s, phase, phaseEndsAt: d === undefined ? null : now + d };
 }
 
@@ -84,7 +86,7 @@ export function forcePhase(s: PhaseState, phase: Phase, now: number): PhaseState
   return enterPhase({ ...s, round: Math.max(1, s.round) }, phase, now);
 }
 
-/** 이 단계에서 이동할 수 있는지 (준비 단계/라운드 종료에는 이동 불가) */
-export function canMoveIn(phase: Phase): boolean {
-  return phase === "ATTACK" || phase === "REPAIR";
+/** 이 단계에서 이동할 수 있는지 (라운드 종료에는 불가. 준비 단계는 NEON에서만 결계 안에서 이동 가능) */
+export function canMoveIn(phase: Phase, map?: MapId): boolean {
+  return phase === "ATTACK" || phase === "REPAIR" || (phase === "COUNTDOWN" && map === "NEON");
 }

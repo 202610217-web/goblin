@@ -1,7 +1,8 @@
 // Three.js 장면: 맵, 캐릭터, 3인칭 카메라
 // 좌표 변환: 게임 (x=동, y=북, z=위) → Three.js (X=x, Y=z, Z=-y)
 import * as THREE from "three";
-import { BOXES, HOUSES, PHYS, type TeamId } from "../../shared/world";
+import { BARRIERS, BARRIER_HEIGHT, BOXES, BOXES_BY_MAP, type Box, HOUSES, MAPS, type MapId, PHYS, type TeamId, mapAt } from "../../shared/world";
+import { NEON_GRID, NEON_ZONES, cellCenter } from "../../shared/neon";
 import { AIM, type Vec3, aimRay, clampPitch, rayAabb } from "../../shared/aim";
 import type { Body } from "../../shared/sim";
 import { ARROW, type ClassId } from "../../shared/classes";
@@ -33,6 +34,8 @@ export class World3D {
     this.scene.add(sun);
 
     this.buildMap();
+    this.buildNeon();
+    this.setMap("CLASSIC");
     this.resize();
     window.addEventListener("resize", () => this.resize());
   }
@@ -58,7 +61,25 @@ export class World3D {
     return out.set(x, z, -y);
   }
 
+  /** 맵별 장면 묶음 (고른 맵만 보인다) */
+  private classic = new THREE.Group();
+  private neon = new THREE.Group();
+  private barrierGroup = new THREE.Group();
+
+  /** 보여 줄 맵 */
+  setMap(map: MapId) {
+    this.classic.visible = map === "CLASSIC";
+    this.neon.visible = map === "NEON";
+    const sky = map === "NEON" ? 0x1a1c2c : 0x8fb8de;
+    (this.scene.background as THREE.Color).setHex(sky);
+    this.scene.fog!.color.setHex(sky);
+  }
+
+  /** 준비 시간 결계 보이기/숨기기 */
+  setBarriers(on: boolean) { this.barrierGroup.visible = on; }
+
   private buildMap() {
+    this.scene.add(this.classic);
     // 바닥
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(PHYS.MAP_X, PHYS.MAP_Y),
@@ -66,18 +87,18 @@ export class World3D {
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(PHYS.MAP_X / 2, 0, -PHYS.MAP_Y / 2);
-    this.scene.add(ground);
+    this.classic.add(ground);
     const grid = new THREE.GridHelper(PHYS.MAP_X, PHYS.MAP_X, 0x5c8549, 0x5c8549);
     grid.scale.z = PHYS.MAP_Y / PHYS.MAP_X;
     grid.position.set(PHYS.MAP_X / 2, 0.01, -PHYS.MAP_Y / 2);
-    this.scene.add(grid);
+    this.classic.add(grid);
 
     // 맵 테두리 (낮은 울타리, 보기용)
     const fenceMat = new THREE.MeshLambertMaterial({ color: 0x7a5a3a });
     const fence = (cx: number, cy: number, sx: number, sy: number) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(sx, 0.6, sy), fenceMat);
       m.position.set(cx, 0.3, -cy);
-      this.scene.add(m);
+      this.classic.add(m);
     };
     fence(PHYS.MAP_X / 2, -0.1, PHYS.MAP_X + 0.4, 0.2);
     fence(PHYS.MAP_X / 2, PHYS.MAP_Y + 0.1, PHYS.MAP_X + 0.4, 0.2);
@@ -93,12 +114,12 @@ export class World3D {
       houseA: new THREE.MeshLambertMaterial({ color: 0xc9a08a }),
       houseB: new THREE.MeshLambertMaterial({ color: 0x8aa0c9 }),
     };
-    for (const b of BOXES) {
+    for (const b of BOXES_BY_MAP.CLASSIC) {
       const sx = b.x1 - b.x0, sy = b.y1 - b.y0, sz = b.z1 - b.z0;
       const key = b.kind === "house" ? `house${b.team}` : b.kind;
       const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sz, sy), mats[key]);
       m.position.set((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, -(b.y0 + b.y1) / 2);
-      this.scene.add(m);
+      this.classic.add(m);
     }
 
     // 집 지붕 (보기용 사각뿔) + 문
@@ -110,13 +131,97 @@ export class World3D {
       );
       roof.rotation.y = Math.PI / 4;
       roof.position.set(h.x, h.height + 1.2, -h.y);
-      this.scene.add(roof);
+      this.classic.add(roof);
       const doorX = t === "A" ? h.x + h.size / 2 + 0.01 : h.x - h.size / 2 - 0.01;
       const door = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 2.4), new THREE.MeshLambertMaterial({ color: 0x5a3a22 }));
       door.rotation.y = t === "A" ? Math.PI / 2 : -Math.PI / 2;
       door.position.set(doorX, 1.2, -h.y);
-      this.scene.add(door);
+      this.classic.add(door);
     }
+  }
+
+  /** NEON DISTRICT: 서버와 같은 충돌 상자(BOXES_BY_MAP.NEON)를 그대로 그리고, 네온 테두리·나무·사이트 글자만 장식으로 더한다 */
+  private buildNeon() {
+    const g = this.neon;
+    this.scene.add(g);
+    const m = MAPS.NEON, w = m.x1 - m.x0, h = m.y1 - m.y0;
+    const plane = (r: { x0: number; y0: number; x1: number; y1: number }, color: number, y: number, opacity = 1) => {
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(r.x1 - r.x0, r.y1 - r.y0),
+        new THREE.MeshLambertMaterial({ color, transparent: opacity < 1, opacity, depthWrite: opacity === 1 }));
+      p.rotation.x = -Math.PI / 2;
+      p.position.set((r.x0 + r.x1) / 2, y, -(r.y0 + r.y1) / 2);
+      g.add(p);
+    };
+    plane(m, 0x2a2d3a, 0); // 아스팔트
+    plane(NEON_ZONES.siteA, 0xffb02e, 0.01, 0.18);
+    plane(NEON_ZONES.siteB, 0x2ee6ff, 0.01, 0.16);
+    plane(NEON_ZONES.spawnAtk, 0xff5a5a, 0.02, 0.35);
+    plane(NEON_ZONES.spawnDef, 0x4fa8ff, 0.02, 0.35);
+    const fenceMat = new THREE.MeshLambertMaterial({ color: 0x44485c });
+    for (const [cx, cy, sx, sy] of [[m.x0 + w / 2, -0.1, w + 0.4, 0.2], [m.x0 + w / 2, h + 0.1, w + 0.4, 0.2], [m.x0 - 0.1, h / 2, 0.2, h], [m.x1 + 0.1, h / 2, 0.2, h]] as const) {
+      const f = new THREE.Mesh(new THREE.BoxGeometry(sx, 1.2, sy), fenceMat);
+      f.position.set(cx, 0.6, -cy);
+      g.add(f);
+    }
+    const mats: Record<string, THREE.Material> = {
+      building: new THREE.MeshLambertMaterial({ color: 0x343a55 }),
+      wall: new THREE.MeshLambertMaterial({ color: 0x7d8396 }),
+      hedge: new THREE.MeshLambertMaterial({ color: 0x2f7a3e }),
+      crate: new THREE.MeshLambertMaterial({ color: 0xa27a46 }),
+      prop: new THREE.MeshLambertMaterial({ color: 0x6d5f86 }),
+      step: new THREE.MeshLambertMaterial({ color: 0x8b93a6 }),
+      platform: new THREE.MeshLambertMaterial({ color: 0x9aa2b5 }),
+      ramp: new THREE.MeshLambertMaterial({ color: 0x8b93a6 }),
+      A: new THREE.MeshLambertMaterial({ color: 0xffb02e, emissive: 0x553300 }),
+      B: new THREE.MeshLambertMaterial({ color: 0x2ee6ff, emissive: 0x004450 }),
+    };
+    const edge = { building: new THREE.LineBasicMaterial({ color: 0xff3df0 }), building2: new THREE.LineBasicMaterial({ color: 0x2ee6ff }) };
+    BOXES_BY_MAP.NEON.forEach((b: Box, i) => {
+      const geo = new THREE.BoxGeometry(b.x1 - b.x0, b.z1 - b.z0, b.y1 - b.y0);
+      const mesh = new THREE.Mesh(geo, mats[b.site ?? b.kind]);
+      mesh.position.set((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, -(b.y0 + b.y1) / 2);
+      g.add(mesh);
+      // 건물 모서리 네온 선 (장식)
+      if (b.kind === "building") {
+        const line = new THREE.LineSegments(new THREE.EdgesGeometry(geo), i % 2 ? edge.building : edge.building2);
+        line.position.copy(mesh.position);
+        g.add(line);
+      }
+    });
+    // 나무 잎 (장식, 충돌은 기둥만)
+    const leaf = new THREE.MeshLambertMaterial({ color: 0x2f8f4e });
+    for (let s = 0; s < NEON_GRID.length; s++) for (let c = 0; c < NEON_GRID[s]!.length; c++) {
+      if (NEON_GRID[s]![c] !== "o") continue;
+      const p = cellCenter(c, s);
+      const crown = new THREE.Mesh(new THREE.SphereGeometry(1.3, 10, 8), leaf);
+      crown.position.set(p.x, 3.4, -p.y);
+      g.add(crown);
+    }
+    // 사이트 글자 (멀리서도 보이게 건물 위에 떠 있는 판)
+    for (const b of BOXES_BY_MAP.NEON) {
+      if (!b.site) continue;
+      const cv = document.createElement("canvas");
+      cv.width = cv.height = 128;
+      const ctx = cv.getContext("2d")!;
+      ctx.font = "bold 110px sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = b.site === "A" ? "#ffb02e" : "#2ee6ff";
+      ctx.fillText(b.site, 64, 70);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), fog: false }));
+      sp.scale.set(3.5, 3.5, 1);
+      sp.position.set((b.x0 + b.x1) / 2, b.z1 + 2.5, -(b.y0 + b.y1) / 2);
+      g.add(sp);
+    }
+    // 결계: 반투명 벽 (역할별 색: 모두 = 보라, 공격팀만 = 빨강, 수비팀만 = 파랑)
+    const color = { all: 0xff3df0, atk: 0xff5a5a, def: 0x4fa8ff } as const;
+    for (const w of BARRIERS) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w.x1 - w.x0, BARRIER_HEIGHT, w.y1 - w.y0),
+        new THREE.MeshBasicMaterial({ color: color[w.role], transparent: true, opacity: 0.35, depthWrite: false }));
+      mesh.position.set((w.x0 + w.x1) / 2, BARRIER_HEIGHT / 2, -(w.y0 + w.y1) / 2);
+      this.barrierGroup.add(mesh);
+    }
+    this.barrierGroup.visible = false;
+    g.add(this.barrierGroup);
   }
 
   /** 지금 카메라 거리 비율 (1 = 기본 거리, 벽에 가리면 작아짐) */
@@ -153,13 +258,14 @@ export class World3D {
     const pad = CONFIG.CAMERA_WALL_PAD;
     let k = 1;
     for (const b of BOXES) {
-      const top = b.kind === "house" ? b.z1 + 2.6 : b.z1; // 집은 지붕까지
+      const top = b.kind === "house" && !b.site ? b.z1 + 2.6 : b.z1; // 기본 맵 집은 지붕까지
       const t = rayAabb(head, d, { x: b.x0 - pad, y: b.y0 - pad, z: b.z0 - pad }, { x: b.x1 + pad, y: b.y1 + pad, z: top + pad });
       if (t !== null && t < k) k = t;
     }
     // 맵 밖 울타리 너머로도 나가지 않게
     const bx = head.x + d.x, by = head.y + d.y;
-    for (const [v, dv, lo, hi] of [[bx, d.x, 0.3, PHYS.MAP_X - 0.3], [by, d.y, 0.3, PHYS.MAP_Y - 0.3]] as const) {
+    const mb = MAPS[mapAt(head.x)];
+    for (const [v, dv, lo, hi] of [[bx, d.x, mb.x0 + 0.3, mb.x1 - 0.3], [by, d.y, mb.y0 + 0.3, mb.y1 - 0.3]] as const) {
       if (v < lo && dv < 0) k = Math.min(k, (lo - (v - dv)) / dv);
       if (v > hi && dv > 0) k = Math.min(k, (hi - (v - dv)) / dv);
     }

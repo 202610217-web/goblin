@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { decide, planFor } from "../src/bots";
 import { newCombat, applyHit } from "../src/combat";
 import { makeBody, radToAngle, simulate, withAngle } from "../../shared/sim";
-import { PHYS, SPAWNS, isNearHouse } from "../../shared/world";
+import { PHYS, SPAWNS, isNearHouse, isNearSite } from "../../shared/world";
+import { NEON_SPAWNS } from "../../shared/neon";
 
 /** 계획대로 걸어가 본다 (지점마다 방향을 다시 잡음) */
 function walk(team: "A" | "B", slot: number, phase: "ATTACK" | "REPAIR", attacking: "A" | "B") {
@@ -123,5 +124,34 @@ describe("작업하러 가는 더미", () => {
     const d = decide(bot, plan, [e], ctx);
     expect(d.attack).toBeUndefined();
     expect(d.angle).not.toBe(-1);
+  });
+});
+
+describe("NEON DISTRICT 더미 길 (격자 길 찾기 → 실제 물리로 걸어 봄)", () => {
+  /** 지점마다 방향을 다시 잡으며 걷기 (서버 더미처럼) */
+  function walkPlan(start: { x: number; y: number }, waypoints: { x: number; y: number }[]) {
+    let b = makeBody(start.x, start.y, 0);
+    let t = 0;
+    for (const wp of waypoints) {
+      for (let k = 0; k < 40 && Math.hypot(wp.x - b.x, wp.y - b.y) > 0.3; k++) {
+        b = withAngle(b, radToAngle(Math.atan2(wp.y - b.y, wp.x - b.x)), t);
+        t += Math.min(400, (Math.hypot(wp.x - b.x, wp.y - b.y) / PHYS.SPEED) * 1000);
+        b = simulate(b, t);
+      }
+    }
+    return b;
+  }
+  for (const [role, i, site] of [["atk", 0, "A"], ["atk", 1, "B"], ["def", 0, "A"], ["def", 1, "B"]] as const) {
+    it(`${role === "atk" ? "공격" : "수비"} 더미 ${i}번 → ${site} 사이트 건물 앞`, () => {
+      const start = NEON_SPAWNS[role][i]!;
+      const plan = planFor(role === "atk" ? "A" : "B", "ATTACK", "A", i, "NEON", start);
+      expect(plan.site).toBe(site);
+      expect(plan.hold).toBe(role === "atk");
+      const b = walkPlan(start, plan.waypoints);
+      expect(isNearSite(site, b.x, b.y, b.z)).toBe(true);
+    });
+  }
+  it("공격 더미는 준비 시간에는 움직이지 않는다", () => {
+    expect(planFor("A", "COUNTDOWN", "A", 0, "NEON").waypoints).toEqual([]);
   });
 });

@@ -35,6 +35,8 @@ export const PONG_MESSAGE = "pong";
 export const CLASS_SELECT_MS = 5_000;
 /** 준비 단계(COUNTDOWN) 시간 */
 export const COUNTDOWN_MS = 10_000;
+/** NEON DISTRICT 준비 시간: 이동 가능 + 결계 작동 (끝나는 순간 결계가 모두 사라지고 공격 단계 시작) */
+export const PREP_MS = 15_000;
 /** 공격 단계(ATTACK) 시간 */
 export const ATTACK_MS = 120_000;
 /** 수리 단계(REPAIR) 시간 */

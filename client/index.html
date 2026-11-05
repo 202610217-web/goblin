@@ -43,6 +43,11 @@
     </div>
     <p id="connNotice" class="hint small hidden"></p>
     <div class="row"><button id="readyBtn">준비</button><button id="leaveBtn" class="secondary">나가기</button></div>
+    <div class="row" id="mapRow">
+      <button data-map="CLASSIC" class="secondary">🏠 기본 맵</button>
+      <button data-map="NEON" class="secondary">🌃 NEON DISTRICT</button>
+    </div>
+    <p id="mapHint" class="hint small"></p>
     <div class="row"><button id="startBtn" class="hidden">게임 시작</button></div>
     <p id="startHint" class="hint small"></p>
     <p class="hint">4명이 2대2로 모두 준비하면 방장(👑)이 시작해요. 친구에게 방 코드 <b id="lobbyRoom2"></b> 를 알려 주세요.</p>
@@ -77,6 +82,11 @@
     <div id="history"></div>
     <div id="deuceBadge" class="badge hidden">듀스 · 2점 차가 나야 승리</div>
     <div id="hudRole"></div>
+    <!-- NEON: A/B 사이트 건물 체력 -->
+    <div id="siteBars" class="hidden">
+      <div class="site A"><b>A</b><div class="bar"><div id="siteFillA"></div></div><span id="siteHpA"></span></div>
+      <div class="site B"><b>B</b><div class="bar"><div id="siteFillB"></div></div><span id="siteHpB"></span></div>
+    </div>
     <div id="workBar" class="hidden">
       <div id="workLabel"></div>
       <div class="bar"><div id="workFill"></div><div id="workCheckpoint"></div></div>
@@ -87,6 +97,7 @@
   <div id="netStatus"></div>
   <div id="teamPanelMine" class="teamPanel left hidden"></div>
   <div id="teamPanelEnemy" class="teamPanel right hidden"></div>
+  <canvas id="minimap" class="hidden"></canvas>
   <div id="debug" class="hidden"></div>
 
   <!-- 점수판 (탭하면 열고 닫힘) -->
