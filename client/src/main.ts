@@ -220,7 +220,7 @@ const CLASS_ICON: Record<string, string> = {
   JAVELIN: svgIcon('<path d="M4 20L17 7"/><path d="M14 4H20V10"/><path d="M14 4L20 10"/>'),
   GOBLIN: svgIcon('<path d="M5 19L14 10"/><path d="M14 10L19 5L18 9L14 10Z"/><path d="M7 13L11 17"/>'),
 };
-const CLASS_DESC: Record<string, string> = { KNIGHT: "검과 방패 · 근접 · 빠른 발", ARCHER: "활 · 빠른 화살", JAVELIN: "창 · 느리지만 강한 한 방", GOBLIN: "단검 · 앉으면 은신 10초(쿨 15초) · 등 뒤 1.5배" };
+const CLASS_DESC: Record<string, string> = { KNIGHT: "검과 방패 · 근접 · 빠른 발", ARCHER: "활 · 빠른 화살", JAVELIN: "창 · 느리지만 강한 한 방", GOBLIN: "단검 · 스킬 은신 10초(쿨 15초) · 등 뒤 1.5배" };
 document.querySelectorAll<HTMLButtonElement>("[data-cls]").forEach((b) => {
   const c = CLASSES[b.dataset.cls as keyof typeof CLASSES];
   const all = Object.values(CLASSES);
@@ -711,8 +711,9 @@ function renderButtons(now: number) {
   const skill = SKILLS[mine.cls];
   $("skillBtn").classList.toggle("hidden", !skill);
   if (skill) {
-    const active = Math.max(0, (mine.combat.skillUntil ?? 0) - now);
-    const scd = Math.max(0, (mine.combat.skillReadyAt ?? 0) - now);
+    const c = mine.combat, st = !!skill.stealth; // 고블린 은신은 은신 시각을 그대로 쓴다
+    const active = Math.max(0, ((st ? c.stealthUntil : c.skillUntil) ?? 0) - now);
+    const scd = Math.max(0, ((st ? c.stealthReadyAt : c.skillReadyAt) ?? 0) - now);
     $("skillBtn").classList.toggle("on", active > 0);
     $("skillBtn").classList.toggle("cooling", active === 0 && (scd > 0 || !movable()));
     setText("skillLabel", active > 0 ? `${Math.ceil(active / 1000)}초` : scd > 0 ? (scd / 1000).toFixed(1) : skill.name);
@@ -807,7 +808,7 @@ function frame() {
     }
     $("crouchBtn").classList.toggle("on", !!m.body.k);
     // 4-2) 스킬 (쿨타임·적용은 서버가 판단, 결과는 room_state/move로 온다)
-    if (input.consumeSkill() && movable() && myNormal() && SKILLS[m.info.cls] && now >= (m.info.combat.skillReadyAt ?? 0)) net.send({ t: "skill" });
+    if (input.consumeSkill() && movable() && myNormal() && SKILLS[m.info.cls]) net.send({ t: "skill" }); // 쿨타임은 서버가 막는다
     // 4-3) 궁극기 (게이지 100%, 앞쪽 범위 안 적 확인은 서버가 한다)
     if (input.consumeUlt() && movable() && myNormal() && ULTS[m.info.cls] && (m.info.combat.ult ?? 0) >= 100) net.send({ t: "ult", yaw: m.face });
     // 5) 타격 (1회 = 메시지 1개). 원거리는 조준점(카메라) 방향, 근접은 캐릭터가 바라보는 방향으로. 판정은 서버가 같은 방향으로 한다

@@ -35,13 +35,17 @@ export const KILL_TARGET = 15;
 
 /**
  * 스킬 버튼: 기사 = 10초 이속 증가(쿨 15초), 궁수 = 10초 공속 증가(쿨 20초),
- * 창던지기병 = 10초 안에 던지는 다음 창 한 발이 맞은 적을 2초 동안 50% 느리게(쿨 15초). 없는 직업은 버튼이 숨는다
+ * 창던지기병 = 10초 안에 던지는 다음 창 한 발이 맞은 적을 2초 동안 50% 느리게(쿨 15초),
+ * 고블린 = 10초 은신(공격하면 풀림, 끝난 뒤 15초 쿨). 없는 직업은 버튼이 숨는다
  */
 export const SKILLS: Partial<Record<ClassId, {
   name: string; durationMs: number; cooldownMs: number; speedMul?: number; attackCooldownMs?: number; slowMs?: number; slowMul?: number;
+  /** 고블린 은신: 시간은 STEALTH 규칙(공격하면 풀림, 끝난 뒤부터 쿨타임)을 따른다 */
+  stealth?: boolean;
 }>> = {
   KNIGHT: { name: "질주", durationMs: 10_000, cooldownMs: 15_000, speedMul: 1.3 },
   ARCHER: { name: "속사", durationMs: 10_000, cooldownMs: 20_000, attackCooldownMs: 700 },
+  GOBLIN: { name: "은신", durationMs: STEALTH.DURATION_MS, cooldownMs: STEALTH.COOLDOWN_MS, stealth: true },
   JAVELIN: { name: "발 묶기", durationMs: 10_000, cooldownMs: 15_000, slowMs: 2_000, slowMul: 0.5 },
 };
 

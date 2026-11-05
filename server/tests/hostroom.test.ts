@@ -165,6 +165,26 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     host.stop();
   });
 
+  it("고블린 은신은 스킬 버튼: 앉아도 은신 안 됨, 스킬로 10초 은신, 공격하면 풀림", async () => {
+    const host = new HostRoom("HIDE", { DEBUG_COMMANDS: "true" });
+    const a = fakePeer();
+    host.addPeer(a, "HOST");
+    await tick();
+    a.push({ t: "join", nickname: "고블린" }); await tick(5);
+    a.push({ t: "start_practice" }); await tick(5);
+    a.push({ t: "set_class", cls: "GOBLIN" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "COUNTDOWN" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "PLAY" }); await tick(5);
+    const me = () => last(a, "room_state").players.find((p: any) => p.id === last(a, "welcome").playerId);
+    a.push({ t: "crouch", on: true, s: 1 }); await tick(5);
+    expect(me().combat.stealthUntil ?? 0).toBeLessThanOrEqual(Date.now());
+    a.push({ t: "skill" }); await tick(5);
+    expect(me().combat.stealthUntil - Date.now()).toBeGreaterThan(9_000);
+    a.push({ t: "attack", yaw: 0, pitch: 0.3 }); await tick(5);
+    expect(me().combat.stealthUntil).toBeLessThanOrEqual(Date.now()); // 공격하면 모습이 드러남
+    host.stop();
+  });
+
   it("고블린이 등 뒤에서 찌르면 1.5배 (swing에 실제 데미지), 앞에서는 기본 데미지", async () => {
     const host = new HostRoom("BACK", { DEBUG_COMMANDS: "true" });
     const a = fakePeer(), b = fakePeer();

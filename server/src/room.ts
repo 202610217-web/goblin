@@ -381,10 +381,6 @@ export class GameRoom extends DurableObject<Env> {
           if (a !== player.body.a) player.body = roundBody(withAngle(player.body, a, at));
         } else if (msg.t === "crouch") {
           if (movable || !msg.on) player.body = roundBody(withCrouch(player.body, msg.on, at)); // 일어서기는 언제나
-          // 고블린: 앉으면 은신, 일어서면 은신 끝
-          const before = player.c.stealthUntil;
-          if (cls(player).sneaky) player.c = player.body.k ? startStealth(player.c, now) : endStealth(player.c, now);
-          if (player.c.stealthUntil !== before) this.broadcastRoomState(now);
         } else if (movable) {
           const jumped = withJump(player.body, at); // 공중에 있으면 null (무시)
           if (jumped) player.body = roundBody(jumped);
@@ -407,6 +403,16 @@ export class GameRoom extends DurableObject<Env> {
       case "skill": {
         const skill = SKILLS[player.cls ?? "KNIGHT"];
         if (!skill || !isCombatPhase(st.phase)) return this.sendError(ws, "cannot_skill", "지금은 스킬을 쓸 수 없어요");
+        if (skill.stealth) {
+          // 고블린 은신: 은신 규칙(공격하면 풀림, 끝난 뒤부터 쿨타임)은 combat.ts startStealth/endStealth
+          const before = player.c.stealthUntil;
+          player.c = startStealth(player.c, now);
+          if (player.c.stealthUntil === before) return this.sendError(ws, "cannot_skill", "스킬 쿨타임이에요");
+          this.markDirty();
+          await this.commit();
+          this.broadcastRoomState(now);
+          return;
+        }
         const before = player.c.skillUntil;
         player.c = startSkill(player.c, now, skill.durationMs, skill.cooldownMs);
         if (player.c.skillUntil === before) return this.sendError(ws, "cannot_skill", "스킬 쿨타임이에요");
