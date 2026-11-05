@@ -486,3 +486,4 @@ button.iconBtn { position: fixed; width: 40px; height: 40px; min-height: 40px; m
 #roundBanner small { font-size: 15px; font-weight: 500; color: var(--muted); margin-top: 6px; }
 /* 맞은 방향: 화면 가장자리 쪽 얇은 빨간 호 */
 .dmgDir { width: 84vmin; height: 84vmin; margin: -42vmin 0 0 -42vmin; background: none; border: 0 solid transparent; border-top: 5px solid rgba(229, 72, 77, 0.9); }
+.error:empty { display: none; } /* 오류가 없으면 빈 칸도 없게 */

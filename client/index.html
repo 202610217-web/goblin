@@ -33,21 +33,19 @@
     <div class="row">
       <button id="hostBtn" class="secondary">내 기기로 방 만들기</button>
     </div>
-    <p class="hint small">내 기기로 방을 만들면 이 기기가 게임 서버가 되고, 친구들이 이 기기에 직접 연결해요 (와이파이에서도 빨라요). 친구는 방 코드로 <b>입장</b>만 누르면 돼요.</p>
     <p id="joinError" class="error"></p>
     <p id="a2hsHint" class="hint hidden">홈 화면에 추가하면 전체 화면으로 즐길 수 있어요 (공유 버튼 → 홈 화면에 추가)</p>
   </div>
 
   <!-- 로비 -->
   <div id="lobby" class="panel hidden">
-    <h2>방 <span id="lobbyRoom"></span> <small class="roomShare">친구에게 방 코드 <b id="lobbyRoom2"></b> 를 알려 주세요</small></h2>
+    <h2>방 <span id="lobbyRoom"></span></h2>
     <div class="lobbyGrid">
       <section>
         <div class="teams">
           <div class="team A"><h3>A팀</h3><div id="teamA"></div><button data-team="A" class="secondary">A팀으로</button></div>
           <div class="team B"><h3>B팀</h3><div id="teamB"></div><button data-team="B" class="secondary">B팀으로</button></div>
         </div>
-        <p id="connNotice" class="hint small hidden"></p>
         <div class="row"><button id="readyBtn">준비</button><button id="startBtn" class="hidden">게임 시작</button><button id="leaveBtn" class="secondary">나가기</button></div>
         <p id="startHint" class="hint small"></p>
       </section>
@@ -57,14 +55,12 @@
           <button data-map="CLASSIC" class="secondary">기본 맵</button>
           <button data-map="NEON" class="secondary">NEON DISTRICT</button>
         </div>
-        <p id="mapHint" class="hint small"></p>
         <h3 class="sub">혼자 연습</h3>
         <div class="row practice">
           <button id="addBotsBtn" class="secondary">더미로 채우기</button>
           <button id="removeBotsBtn" class="secondary hidden">더미 빼기</button>
           <button id="practiceBtn" class="secondary">연습 시작</button>
         </div>
-        <p class="hint small">더미는 빈자리 연습 상대예요. 친구가 들어오면 자리를 비켜 줘요.</p>
         <h3 class="sub">설정</h3>
         <label class="check"><input type="checkbox" id="vibrateToggle" /> 맞으면 진동</label>
         <label class="check"><input type="checkbox" id="gfxToggle" /> 고화질 그래픽 (선명한 그림자 · 빛 번짐)</label>
@@ -94,7 +90,6 @@
     </div>
     <div id="history"></div>
     <div id="deuceBadge" class="badge hidden">듀스 · 2점 차가 나야 승리</div>
-    <div id="hudRole"></div>
     <!-- NEON: A/B 사이트 건물 체력 -->
     <div id="siteBars" class="hidden">
       <div class="site A"><b>A</b><div class="bar"><div id="siteFillA"></div></div><span id="siteHpA"></span></div>

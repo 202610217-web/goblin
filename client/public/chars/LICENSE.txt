@@ -1,0 +1,3 @@
+캐릭터 모델: KayKit Adventurers Character Pack 1.0 — Kay Lousberg (www.kaylousberg.com)
+License: Creative Commons Zero (CC0) — 개인·교육·상업 용도 무료.
+tools/kaykit_chars.mjs 로 쓰는 동작·장비만 남겨 줄였습니다.

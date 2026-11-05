@@ -603,7 +603,6 @@ window.addEventListener("pagehide", stopEverything);
 function renderLobby() {
   if (!room) return;
   $("lobbyRoom").textContent = room.room;
-  $("lobbyRoom2").textContent = room.room;
   for (const t of ["A", "B"] as TeamId[]) {
     const box = $(`team${t}`);
     box.replaceChildren(...room.players.filter((p) => p.team === t).map((p) => {
@@ -617,14 +616,6 @@ function renderLobby() {
       return d;
     }));
   }
-  // 연결 방식 안내
-  const notice = $("connNotice");
-  if (net.mode === "host") {
-    notice.textContent = "이 기기가 방 서버예요. 게임 중에 화면을 끄거나 다른 앱으로 가면 모두 멈춰요. 친구는 방 코드로 입장하면 돼요.";
-  } else if (net.mode === "p2p") {
-    notice.textContent = `호스트 기기에 연결됨 (${net.label})`;
-  } else notice.textContent = "";
-  notice.classList.toggle("hidden", !notice.textContent);
   const bots = room.players.filter((p) => p.bot).length;
   $("addBotsBtn").classList.toggle("hidden", room.players.length >= 4);
   $("removeBotsBtn").classList.toggle("hidden", bots === 0);
@@ -635,9 +626,6 @@ function renderLobby() {
     b.classList.toggle("on", b.dataset.map === map);
     b.disabled = !owner;
   });
-  setText("mapHint", (owner ? "" : `방장이 고른 맵: ${MAPS[map].name} · `) + (map === "NEON"
-    ? "4배 넓은 도시 · 공격팀은 A 또는 B 건물 하나를 부수면 승리, 수비팀은 2분 버티면 승리 · 준비 15초(결계)"
-    : "원래 방식 · 상대 팀 집을 부수고, 수리를 막으면 승리"));
   const startBtn = $<HTMLButtonElement>("startBtn");
   startBtn.classList.toggle("hidden", !owner);
   $("practiceBtn").classList.toggle("hidden", !owner);
@@ -692,36 +680,19 @@ function renderHud(now: number) {
   if (OFFLINE) {
     setText("hudRound", "혼자 연습 모드");
     setText("hudTimer", "자유 이동");
-    setText("hudRole", "왼쪽: 이동 · 오른쪽 드래그: 카메라 · 점프 버튼");
     setText("netStatus", "서버 없음 (연습)");
   } else {
     const left = room.phaseEndsAt === null ? 0 : Math.max(0, Math.ceil((room.phaseEndsAt - now) / 1000));
     const mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, "0");
-    const phaseName = room.phase === "COUNTDOWN" && room.map === "NEON" ? "준비 시간" : PHASE_NAME[room.phase];
-    setText("hudRound", `${room.practice ? "연습 · " : ""}라운드 ${room.round} · ${phaseName}`);
+    // 점수판 윗줄 한 줄: "라운드 2 · 공격 · 준비" (역할은 내 팀 기준, 단계 이름은 공격/수비와 헷갈리지 않게 짧게)
+    const atk = !!mine && mine.team === room.attackingTeam;
+    const step = room.phase === "COUNTDOWN" ? " · 준비" : room.phase === "REPAIR" ? " · 수리" : room.phase === "ROUND_END" ? " · 종료" : "";
+    setText("hudRound", room.phase === "ATTACK" || room.phase === "REPAIR" || room.phase === "COUNTDOWN" || room.phase === "ROUND_END"
+      ? `${room.practice ? "연습 · " : ""}라운드 ${room.round} · ${atk ? "공격" : "수비"}${step}`
+      : PHASE_NAME[room.phase]);
     setText("hudTimer", room.phase === "MATCH_END" ? `${room.matchWinner ?? "-"}${room.matchWinner ? "팀 승리" : ""}` : room.phase === "COUNTDOWN" || room.phase === "ROUND_END" || room.phase === "CLASS_SELECT" ? `${left}` : `${mm}:${ss}`);
     if (room.phase === "CLASS_SELECT") setText("classLeft", String(left));
     $("hudTimer").classList.toggle("urgent", movable() && left <= CONFIG.TIMER_URGENT_S);
-    if (room.phase === "MATCH_END") setText("hudRole", "");
-    else if (mine) {
-      const atk = mine.team === room.attackingTeam;
-      const enemy = other(mine.team);
-      const prep = room.phase === "COUNTDOWN";
-      const broken = room.sites ? SITE_IDS.find((s) => room!.sites![s].kind === "REPAIR") : undefined;
-      // 짧은 역할 배지: "⚔ 공격 · 할 일" (색 줄로 역할 구분)
-      const goal = room.map === "NEON"
-        ? room.phase === "REPAIR" && broken
-          ? (atk ? `${broken} 수리 막기` : `${broken} 건물 고치기`)
-          : prep ? (atk ? "결계가 풀리면 출발" : "A·B로 가서 자리 잡기") : (atk ? "A 또는 B 부수기" : "A·B 지키기")
-        : room.phase === "REPAIR" ? (atk ? "수리 막기" : "집 고치기") : (atk ? `${enemy}팀 집 부수기` : "우리 집 지키기");
-      const roleEl = $("hudRole"), roleKey = `${atk}|${goal}`;
-      if (roleEl.dataset.k !== roleKey) { // 바뀔 때만 다시 그림 (매 프레임 DOM 만들지 않기)
-        roleEl.dataset.k = roleKey;
-        roleEl.innerHTML = `<b>${atk ? "공격" : "수비"}</b><span></span>`;
-        (roleEl.lastChild as HTMLElement).textContent = goal;
-      }
-      $("hudRole").className = atk ? "atk" : "def";
-    }
     const bad = !net.connected || net.unstable || net.rtt > CONFIG.PING_WARN_MS;
     setText("netStatus", net.connected ? `${bad ? "불안정 · " : ""}ping ${Math.round(net.rtt)}ms${route ? " · " + route : ""} · ${Math.round(fps)}fps` : "연결 끊김");
     $("netStatus").classList.toggle("bad", bad);
@@ -1082,6 +1053,7 @@ function frame() {
     const x = a.body.x + a.off.x, y = a.body.y + a.off.y, z = Math.max(0, a.body.z + a.off.z);
     const c = a.info.combat;
     const state = c.state === "NORMAL" ? 0 : c.state === "DOWNED" ? 1 : 2;
+    a.view.activity = work?.holders.includes(id) || SITE_IDS.some((s) => room?.sites?.[s].holders.includes(id)) ? "work" : c.revive ? "revive" : null;
     a.view.update(x, y, z, a.face, groundHeightAt(x, y, z), state, now < c.invulnUntil, a.info.conn === "RECONNECTING", t, !!a.body.k);
     a.view.setStatus(c.hp / classOf(a.info).maxHp, inGame() ? statusText(a.info, now) : "");
     if (a === watch) {

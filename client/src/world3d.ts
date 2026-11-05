@@ -9,6 +9,7 @@ import type { ClassId } from "../../shared/classes";
 import { firstSolid } from "../../shared/arrow";
 import { CONFIG } from "./config";
 import { Lighting, boxGeo, fitTo, groundGeo, model, photoMat } from "./graphics";
+import { Character, type Pose } from "./characters";
 
 const tmp = new THREE.Vector3();
 
@@ -398,9 +399,8 @@ export class PlayerView {
     // 창: 손에서 앞뒤로 긴 막대 + 끝의 날
     spear: new THREE.CylinderGeometry(0.03, 0.03, 2, 6).rotateZ(-Math.PI / 2).translate(0.4, 0, 0),
     spearTip: new THREE.ConeGeometry(0.07, 0.3, 6).rotateZ(-Math.PI / 2).translate(1.55, 0, 0),
-    shadow: new THREE.CircleGeometry(0.5, 20),
+    ring: new THREE.RingGeometry(0.42, 0.5, 40),
   };
-  private static shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false });
   private static flashColor = new THREE.Color(0xffffff);
   private static deadColor = new THREE.Color(0x444444);
   private fist: THREE.Mesh;
@@ -432,7 +432,8 @@ export class PlayerView {
     this.group.add(this.pivot);
     scene.add(this.group);
 
-    this.shadow = new THREE.Mesh(PlayerView.geo.shadow, PlayerView.shadowMat);
+    // 발밑 팀 색 고리 (그림자는 해가 만든다)
+    this.shadow = new THREE.Mesh(PlayerView.geo.ring, new THREE.MeshBasicMaterial({ color: CONFIG.TEAM_COLOR[team], transparent: true, opacity: isMe ? 0.95 : 0.7, depthWrite: false }));
     this.shadow.rotation.x = -Math.PI / 2;
     scene.add(this.shadow);
 
@@ -470,17 +471,28 @@ export class PlayerView {
     }
   }
 
-  /** 손에 든 무기 (기사 = 검, 궁수 = 활) */
+  /** 직업: 3D 캐릭터(기사 / 후드 쓴 석궁수 / 창 든 바바리안). 받기 전에는 도형 캐릭터 + 손 무기 */
   setWeapon(cls: ClassId) {
     this.sword.visible = cls === "KNIGHT";
     this.bow.visible = cls === "ARCHER";
     this.spear.visible = cls === "JAVELIN";
+    if (this.char?.cls === cls) return;
+    if (this.char) this.group.remove(this.char.root);
+    this.char = new Character(cls);
+    this.group.add(this.char.root);
   }
+  private char: Character | null = null;
+  /** 지금 하고 있는 일 (부수기·수리 / 치유) → 그 동작을 반복 */
+  activity: "work" | "revive" | null = null;
+  private lastMs = 0;
+  private lastX = 0;
+  private lastY = 0;
+  private speed = 0;
 
   /** 맞았을 때 번쩍 */
-  flash(nowMs: number) { this.flashUntil = nowMs + CONFIG.HIT_FLASH_MS; }
+  flash(nowMs: number) { this.flashUntil = nowMs + CONFIG.HIT_FLASH_MS; this.char?.hit(); }
   /** 타격 동작 */
-  swing(nowMs: number) { this.swingUntil = nowMs + CONFIG.SWING_MS; }
+  swing(nowMs: number) { this.swingUntil = nowMs + CONFIG.SWING_MS; this.char?.attack(); }
 
   /**
    * 위치/방향/상태 반영. state: 0=정상, 1=기절(눕고 반투명), 2=사망(눕고 회색)
@@ -514,6 +526,26 @@ export class PlayerView {
     this.fist.position.x = PHYS.PLAYER_HALF + Math.sin(sw * Math.PI) * 0.7;
     this.fist.visible = state === 0;
     this.hpWrap.style.display = state === 2 ? "none" : "";
+
+    // 3D 캐릭터: 실제 이동 속도로 가만히/걷기/달리기를 고르고 부드럽게 섞는다
+    const real = this.lastMs ? (nowMs - this.lastMs) / 1000 : 0;
+    const dt = Math.min(0.1, real); // 애니메이션은 한 번에 0.1초까지만 (탭 전환 뒤 튀지 않게)
+    if (real > 0) {
+      const v = Math.hypot(x - this.lastX, y - this.lastY) / real;
+      this.speed += (v - this.speed) * Math.min(1, real * 10); // 튀는 값 누그러뜨리기
+    }
+    this.lastMs = nowMs; this.lastX = x; this.lastY = y;
+    const ch = this.char;
+    if (ch?.ready) {
+      this.pivot.visible = false;
+      ch.root.visible = !this.nearCamera;
+      const pose: Pose = state === 2 ? "dead" : state === 1 ? "down" : z - groundZ > 0.25 ? "air"
+        : this.activity ?? (this.speed > 4 ? "run" : this.speed > 0.4 ? "walk" : "idle");
+      ch.setPose(pose, this.speed);
+      ch.setLook(nowMs < this.flashUntil, opacity, state === 2);
+      ch.root.scale.y = state === 0 && crouch ? 0.72 : 1; // 앉기
+      ch.update(dt);
+    }
   }
 
   /** 이름표를 화면 좌표로 옮긴다 */
