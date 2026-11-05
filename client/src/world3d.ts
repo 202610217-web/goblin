@@ -2,8 +2,10 @@
 // 좌표 변환: 게임 (x=동, y=북, z=위) → Three.js (X=x, Y=z, Z=-y)
 import * as THREE from "three";
 import { BOXES, HOUSES, PHYS, type TeamId } from "../../shared/world";
-import { AIM, aimRay, clampPitch, rayAabb } from "../../shared/aim";
+import { AIM, type Vec3, aimRay, clampPitch, rayAabb } from "../../shared/aim";
 import type { Body } from "../../shared/sim";
+import { ARROW, type ClassId } from "../../shared/classes";
+import { firstSolid } from "../../shared/arrow";
 import { CONFIG } from "./config";
 
 const tmp = new THREE.Vector3();
@@ -167,6 +169,37 @@ export class World3D {
   render() {
     this.renderer.render(this.scene, this.camera);
   }
+
+  // ---------- 화살 (서버 shot 메시지대로 서버 시각 기준으로 날린다) ----------
+  private arrows: { by: string; mesh: THREE.Mesh; origin: Vec3; dir: Vec3; at: number; maxDist: number }[] = [];
+  private static arrowGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 5).rotateZ(-Math.PI / 2); // 길이 방향 = +X
+  private static arrowMat = new THREE.MeshBasicMaterial({ color: 0xfff1b8 });
+
+  addArrow(by: string, origin: Vec3, dir: Vec3, at: number) {
+    const mesh = new THREE.Mesh(World3D.arrowGeo, World3D.arrowMat);
+    World3D.toThree(dir.x, dir.y, dir.z, tmp);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), tmp.normalize());
+    this.scene.add(mesh);
+    // 벽에 닿거나 사거리 끝이면 거기서 사라진다
+    this.arrows.push({ by, mesh, origin, dir, at, maxDist: Math.min(ARROW.MAX_RANGE, firstSolid(origin, dir, 0)) });
+  }
+
+  /** 맞았다는 소식이 오면 그 사람이 쏜 가장 오래된 화살을 지운다 */
+  removeArrow(by: string) {
+    const i = this.arrows.findIndex((a) => a.by === by);
+    if (i < 0) return;
+    this.scene.remove(this.arrows[i]!.mesh);
+    this.arrows.splice(i, 1);
+  }
+
+  updateArrows(serverNow: number) {
+    this.arrows = this.arrows.filter((a) => {
+      const d = (ARROW.SPEED * Math.max(0, serverNow - a.at)) / 1000;
+      if (d > a.maxDist) { this.scene.remove(a.mesh); return false; }
+      World3D.toThree(a.origin.x + a.dir.x * d, a.origin.y + a.dir.y * d, a.origin.z + a.dir.z * d, a.mesh.position);
+      return true;
+    });
+  }
 }
 
 /** 캐릭터 1명의 화면 표시 (메시와 이름표를 재사용, 매 프레임 새 객체를 만들지 않는다) */
@@ -189,12 +222,17 @@ export class PlayerView {
     body: new THREE.CapsuleGeometry(PHYS.PLAYER_HALF, PHYS.PLAYER_HEIGHT - PHYS.PLAYER_HALF * 2, 4, 12),
     visor: new THREE.BoxGeometry(0.2, 0.25, 0.55),
     fist: new THREE.SphereGeometry(0.16, 8, 6),
+    // 검: 주먹에서 앞으로 뻗은 납작한 막대 / 활: 앞으로 휜 세로 호
+    sword: new THREE.BoxGeometry(0.9, 0.1, 0.03).translate(0.5, 0, 0),
+    bow: new THREE.TorusGeometry(0.5, 0.03, 4, 12, Math.PI).rotateZ(-Math.PI / 2),
     shadow: new THREE.CircleGeometry(0.5, 20),
   };
   private static shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false });
   private static flashColor = new THREE.Color(0xffffff);
   private static deadColor = new THREE.Color(0x444444);
   private fist: THREE.Mesh;
+  private sword: THREE.Mesh;
+  private bow: THREE.Mesh;
 
   constructor(scene: THREE.Scene, team: TeamId, nickname: string, isMe: boolean) {
     this.baseColor = new THREE.Color(CONFIG.TEAM_COLOR[team]);
@@ -207,6 +245,11 @@ export class PlayerView {
     // 타격할 때 앞으로 뻗는 주먹
     this.fist = new THREE.Mesh(PlayerView.geo.fist, new THREE.MeshLambertMaterial({ color: 0xffe0b0 }));
     this.fist.position.set(PHYS.PLAYER_HALF, PHYS.PLAYER_HEIGHT * 0.55, -0.25);
+    const wood = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
+    this.sword = new THREE.Mesh(PlayerView.geo.sword, new THREE.MeshLambertMaterial({ color: 0xd8dde6 }));
+    this.bow = new THREE.Mesh(PlayerView.geo.bow, wood);
+    this.bow.visible = false;
+    this.fist.add(this.sword, this.bow);
     this.pivot.add(body, visor, this.fist);
     this.group.add(this.pivot);
     scene.add(this.group);
@@ -247,6 +290,12 @@ export class PlayerView {
       this.lastTag = tag;
       this.tagEl.textContent = tag;
     }
+  }
+
+  /** 손에 든 무기 (기사 = 검, 궁수 = 활) */
+  setWeapon(cls: ClassId) {
+    this.sword.visible = cls === "KNIGHT";
+    this.bow.visible = cls === "ARCHER";
   }
 
   /** 맞았을 때 번쩍 */

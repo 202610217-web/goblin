@@ -43,7 +43,9 @@
     </div>
     <p id="connNotice" class="hint small hidden"></p>
     <div class="row"><button id="readyBtn">준비</button><button id="leaveBtn" class="secondary">나가기</button></div>
-    <p class="hint">4명이 모두 준비하면 시작해요. 친구에게 방 코드 <b id="lobbyRoom2"></b> 를 알려 주세요.</p>
+    <div class="row"><button id="startBtn" class="hidden">게임 시작</button></div>
+    <p id="startHint" class="hint small"></p>
+    <p class="hint">4명이 2대2로 모두 준비하면 방장(👑)이 시작해요. 친구에게 방 코드 <b id="lobbyRoom2"></b> 를 알려 주세요.</p>
     <div class="row practice">
       <button id="addBotsBtn" class="secondary">🤖 더미로 채우기</button>
       <button id="removeBotsBtn" class="secondary hidden">더미 빼기</button>
@@ -53,6 +55,15 @@
     <label class="check"><input type="checkbox" id="vibrateToggle" /> 맞으면 진동</label>
   </div>
 
+  <!-- 직업 선택 (경기 시작 직후 5초) -->
+  <div id="classSelect" class="panel hidden">
+    <h2>직업 선택 · <span id="classLeft"></span>초</h2>
+    <div class="row">
+      <button data-cls="KNIGHT" class="secondary classCard">⚔️ 기사<small>검과 방패 · 체력 150</small></button>
+      <button data-cls="ARCHER" class="secondary classCard">🏹 궁수<small>활 · 체력 70 · 멀리 쏘기</small></button>
+    </div>
+    <p id="classTeam" class="hint"></p>
+  </div>
   <!-- 상단 HUD: 점수 · 라운드 · 남은 시간 · 집 작업 진행률 -->
   <div id="hud" class="hidden">
     <div class="scoreRow">

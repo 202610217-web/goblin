@@ -236,3 +236,9 @@ button.small { position: fixed; font-size: 16px; min-height: 44px; min-width: 64
   #matchScore { font-size: 32px; }
 }
 @media (prefers-reduced-motion: reduce) { .gameBtn.pressed { transform: none; } }
+
+/* 직업 선택 카드 */
+.classCard { min-width: 200px; }
+.classCard small { display: block; font-size: 15px; font-weight: 500; margin-top: 4px; }
+.classCard.on { background: var(--ok); color: #111; outline: 3px solid #fff; }
+#startBtn:disabled { opacity: 0.45; }

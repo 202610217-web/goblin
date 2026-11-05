@@ -17,7 +17,7 @@ export interface Arrow {
 const CHEST = 1.2;
 
 /** 광선이 처음 닿는 벽/상자/땅까지 거리 (없으면 Infinity) */
-function firstSolid(o: Vec3, d: Vec3, tMin: number): number {
+export function firstSolid(o: Vec3, d: Vec3, tMin: number): number {
   let best = d.z < 0 ? (0 - o.z) / d.z : Infinity; // 맨땅(z=0)
   for (const b of BOXES) {
     const t = rayAabb(o, d, { x: b.x0, y: b.y0, z: b.z0 }, { x: b.x1, y: b.y1, z: b.z1 });
