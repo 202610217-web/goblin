@@ -130,8 +130,8 @@ export function wipeWinner(phase: Phase, attackingTeam: Team, teams: Record<Team
 /**
  * 타격 결과를 집 작업과 함께 계산: 맞아도 작업은 계속되고, 기절하면 그 사람의 작업만 중단된다.
  */
-export function resolveHit(target: Combat, targetId: string, work: WorkState, now: number): { c: Combat; work: WorkState } {
-  const c = applyHit(target, now);
+export function resolveHit(target: Combat, targetId: string, work: WorkState, now: number, damage = HIT_DAMAGE): { c: Combat; work: WorkState } {
+  const c = applyHit(target, now, damage);
   const w = c.state === "DOWNED" ? stopHold(work, targetId, now) : work;
   return { c, work: w };
 }

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HostRoom, type PeerLink } from "../../client/src/host/hostRoom";
 import { NEON_SPAWNS } from "../../shared/neon";
 import { simulate } from "../../shared/sim";
+import { CLASSES } from "../../shared/classes";
 import { BARRIERS, SITES } from "../../shared/world";
 import { ATTACK_MS, BREAK_TIME_MS, CLASS_SELECT_MS, PREP_MS, REPAIR_MS, REPAIR_TIME_MS } from "../src/constants";
 
@@ -66,6 +67,7 @@ describe("NEON DISTRICT 방 흐름", () => {
     // A팀(공격)은 서쪽 공격 스폰, B팀(수비)은 동쪽 수비 스폰. 몸에 결계 해제 시각과 역할
     expect(me(a).body).toMatchObject({ x: NEON_SPAWNS.atk[0]!.x, y: NEON_SPAWNS.atk[0]!.y, bu: st.phaseEndsAt, br: "atk" });
     expect(me(b).body).toMatchObject({ x: NEON_SPAWNS.def[0]!.x, y: NEON_SPAWNS.def[0]!.y, bu: st.phaseEndsAt, br: "def" });
+    expect(me(a).body.v).toBe(CLASSES.KNIGHT.speed); // 직업 안 고르면 기사: 기본보다 빠른 걷기 속도
     // 공격팀이 동쪽 출구로 걸어가면 결계에서 멈춘다 (준비 시간에도 이동은 됨)
     a.push({ t: "move", a: 0, s: 1 }); await run(3_000);
     const gate = BARRIERS.find((w) => w.role === "all" && w.x0 === 70)!;
@@ -73,7 +75,7 @@ describe("NEON DISTRICT 방 흐름", () => {
     a.push({ t: "attack", yaw: 0, pitch: 0.3 }); await run(1);
     expect(last(a, "error").code).toBe("cannot_attack");
     // 수비팀은 준비 시간에 서쪽으로 걸어 사이트 쪽으로 이동 가능
-    b.push({ t: "move", a: 16, s: 1 }); await run(1_000);
+    b.push({ t: "move", a: 32, s: 1 }); await run(1_000); // 서쪽 (64단계 중 절반)
     expect(simulate(last(b, "move").body, Date.now()).x).toBeLessThan(NEON_SPAWNS.def[0]!.x - 5);
     // 준비 시간 끝 → 공격 단계, 결계 없음, 공격팀이 출구를 지나간다
     await run(PREP_MS);
@@ -93,10 +95,10 @@ describe("NEON DISTRICT 방 흐름", () => {
     a.push({ t: "join", nickname: "a" }); await run(1);
     a.push({ t: "set_map", map: "NEON" }); await run(1);
     a.push({ t: "start_practice" }); await run(1);
-    a.push({ t: "move", a: 8, s: 1 }); // 직업 선택 중에 북쪽 키
+    a.push({ t: "move", a: 16, s: 1 }); // 직업 선택 중에 북쪽 키
     await run(CLASS_SELECT_MS + 500);
     const body = last(a, "room_state").players[0].body;
-    expect(body.a).toBe(8);
+    expect(body.a).toBe(16);
     expect(simulate(body, Date.now()).y).toBeGreaterThan(NEON_SPAWNS.atk[0]!.y + 1);
     host.stop();
   });

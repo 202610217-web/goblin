@@ -24,7 +24,7 @@ import { type Body, groundHeightAt, makeBody, roundBody, simulate, withAngle, wi
 import { type BarrierRole, MAPS, PHYS, type SiteId, isNearHouse, isNearSite } from "../../shared/world";
 import { NEON_SPAWNS } from "../../shared/neon";
 import { AIM, findAimTarget, inReach } from "../../shared/aim";
-import { ARROW, CLASSES, type ClassId } from "../../shared/classes";
+import { ARROW, CLASSES, CLASS_IDS, type ClassId } from "../../shared/classes";
 import { arrowSegmentHit, makeArrow } from "../../shared/arrow";
 import { type BotPlan, decide, msToWaypoint, planFor } from "./bots";
 import { inputTime } from "./lag";
@@ -590,7 +590,7 @@ export class GameRoom extends DurableObject<Env> {
         const x = Math.min(m.x1 - H, Math.max(m.x0 + H, msg.x));
         const y = Math.min(m.y1 - H, Math.max(m.y0 + H, msg.y));
         this.releaseHold(player, now);
-        player.body = { ...makeBody(x, y, now), z: groundHeightAt(x, y, 100), bu: player.body.bu, br: player.body.br };
+        player.body = { ...makeBody(x, y, now), z: groundHeightAt(x, y, 100), bu: player.body.bu, br: player.body.br, v: player.body.v };
         this.markDirty();
         this.broadcastMove(player);
         this.broadcastWork(now);
@@ -828,15 +828,15 @@ export class GameRoom extends DurableObject<Env> {
       .filter((p) => p.team !== player.team && isHittable(p.c, now))
       .map((p) => ({ id: p.id, body: simulate(p.body, now), p }));
     const hit = findAimTarget(me, yaw, pitch, candidates);
-    this.landHit(player.id, hit?.p ?? null, now);
+    this.landHit(player.id, hit?.p ?? null, now, cls(player).damage);
     return hit?.p ?? null;
   }
 
   /** 맞은 뒤 처리 (근접/화살 공통): 체력, 기절, swing 방송, 전멸 확인 */
-  private landHit(by: string, target: PlayerRecord | null, now: number) {
+  private landHit(by: string, target: PlayerRecord | null, now: number, damage: number) {
     const st = this.state!;
     if (target) {
-      const r = resolveHit(target.c, target.id, st.work, now); // 맞아도 작업 유지, 기절하면 작업 중단
+      const r = resolveHit(target.c, target.id, st.work, now, damage); // 맞아도 작업 유지, 기절하면 작업 중단
       target.c = r.c;
       st.work = r.work;
       if (target.c.state === "DOWNED") this.onDowned(target, now);
@@ -847,7 +847,7 @@ export class GameRoom extends DurableObject<Env> {
 
   /** 화살: 쏜 걸 알리고 50ms마다 지나간 구간을 판정. 메모리 타이머만 쓰고 저장하지 않는다 (0.4초면 끝남) */
   private fireArrow(shooter: PlayerRecord, me: Body, yaw: number, pitch: number, now: number) {
-    const arrow = makeArrow(me, yaw, pitch, now);
+    const arrow = makeArrow(me, yaw, pitch, now, cls(shooter).proj);
     this.broadcast({ t: "shot", by: shooter.id, ...arrow });
     let from = now;
     const step = async () => {
@@ -856,7 +856,7 @@ export class GameRoom extends DurableObject<Env> {
       const to = Math.max(from, Date.now());
       const r = arrowSegmentHit(arrow, from, to, st.players.filter((p) => p.team !== shooter.team && isHittable(p.c, to)));
       if (r.hit) {
-        this.landHit(shooter.id, r.hit, to);
+        this.landHit(shooter.id, r.hit, to, cls(shooter).damage);
         await this.commit();
         this.broadcastRoomState(to);
         this.broadcastWork(to); // 기절로 작업이 멈췄을 수 있음
@@ -915,7 +915,7 @@ export class GameRoom extends DurableObject<Env> {
       const me = seen(bot);
       const enemies = st.players.filter((p) => p.team !== bot.team).map(seen);
       const canAttack = !checkAttack(bot.c, st.phase, this.isHolding(bot.id), now, cls(bot).cooldownMs) && now - bot.c.lastAttackAt >= BOT_ATTACK_COOLDOWN_MS;
-      const d = decide(me, bot.plan, enemies, { phase: st.phase, attackingTeam: st.attackingTeam, holding: this.isHolding(bot.id), canAttack, ranged: cls(bot).ranged });
+      const d = decide(me, bot.plan, enemies, { phase: st.phase, attackingTeam: st.attackingTeam, holding: this.isHolding(bot.id), canAttack, proj: cls(bot).proj ?? null });
       if (d.attack) {
         const hit = this.performAttack(bot, d.attack.yaw, d.attack.pitch, now);
         changed = true;
@@ -1002,7 +1002,7 @@ export class GameRoom extends DurableObject<Env> {
   private startMatchNow(now: number, practice: boolean) {
     const st = this.state!;
     for (const p of st.players) {
-      if (p.bot) p.cls = Math.random() < 0.5 ? "KNIGHT" : "ARCHER";
+      if (p.bot) p.cls = CLASS_IDS[Math.floor(Math.random() * CLASS_IDS.length)]!;
       p.c = newCombat(maxHp(p)); // 누적 기절/사망 횟수도 0
       p.ready = true;
     }
@@ -1051,6 +1051,7 @@ export class GameRoom extends DurableObject<Env> {
         st.players.filter((p) => p.team === team).forEach((p, i) => {
           p.c = resetForRound(p.c, maxHp(p)); // 직업 선택 후 첫 라운드에서 고른 직업 체력이 적용된다
           p.body = spawnBody(team, i, now, st);
+          if (cls(p).speed !== PHYS.SPEED) p.body.v = cls(p).speed; // 직업별 걷는 속도 (물리가 몸 상태로 계산)
           this.refreshMotion(p, now); // NEON 준비 시간은 이동 가능: 누르고 있던 방향으로 바로 출발
         });
       }

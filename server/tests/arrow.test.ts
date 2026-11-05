@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { ARROW } from "../../shared/classes";
+import { ARROW, CLASSES } from "../../shared/classes";
 import { type Arrow, arrowSegmentHit, makeArrow } from "../../shared/arrow";
 import { aimRay } from "../../shared/aim";
 import { type Body, makeBody, withAngle } from "../../shared/sim";
+import { PHYS } from "../../shared/world";
 
 // y=2 줄은 x 10~22가 비어 있는 곳 (aim.test와 같은 빈 곳)
 const flat = (tx: number, ty: number, tz = 1.2): Arrow => {
   const o = { x: 10, y: 2, z: 1.2 };
   const l = Math.hypot(tx - o.x, ty - o.y, tz - o.z);
-  return { origin: o, dir: { x: (tx - o.x) / l, y: (ty - o.y) / l, z: (tz - o.z) / l }, at: 0 };
+  return { origin: o, dir: { x: (tx - o.x) / l, y: (ty - o.y) / l, z: (tz - o.z) / l }, at: 0, speed: 30, range: 12 };
 };
 const enemy = (body: Body) => ({ id: "e", body });
 
@@ -22,8 +23,8 @@ function fly(arrow: Arrow, cands: { id: string; body: Body }[]): { id: string | 
   }
 }
 
-// 북쪽(+y)으로 걷기 = 각도 단계 8 (32단계 중 90도), 남쪽 = 24
-const NORTH = 8, SOUTH = 24;
+// 북쪽(+y)으로 걷기 = 90도, 남쪽 = 270도
+const NORTH = PHYS.ANGLE_STEPS / 4, SOUTH = (PHYS.ANGLE_STEPS * 3) / 4;
 
 describe("화살 비행 판정", () => {
   it("가만히 있는 10m 앞 적은 맞고, 도착까지 약 0.33초", () => {
@@ -47,11 +48,26 @@ describe("화살 비행 판정", () => {
   it("벽 뒤의 적은 벽에서 멈춘다", () => {
     // x=17 벽(y 12~16) 뒤
     const o = { x: 12, y: 14, z: 1.2 };
-    const a: Arrow = { origin: o, dir: { x: 1, y: 0, z: 0 }, at: 0 };
+    const a: Arrow = { origin: o, dir: { x: 1, y: 0, z: 0 }, at: 0, speed: 30, range: 12 };
     expect(fly(a, [enemy(makeBody(20, 14, 0))]).id).toBeNull();
   });
   it("12m 밖은 닿지 않는다", () => {
     expect(fly(flat(30, 2), [enemy(makeBody(23, 2, 0))]).id).toBeNull();
+  });
+  it("창던지기병의 창: 더 느리고(22m/s) 더 멀리(16m) 날아간다", () => {
+    const jav = makeArrow(makeBody(10, 2, 0), 0, 0.1, 0, CLASSES.JAVELIN.proj);
+    expect(jav).toMatchObject({ speed: 22, range: 16 });
+    // y=2 줄 x 10~22 빈 곳: 11m 앞 정지 표적에 0.5초쯤 도착 (화살은 0.37초)
+    const spear = { ...flat(21, 2), speed: 22, range: 16 };
+    const r = fly(spear, [enemy(makeBody(21, 2, 0))]);
+    expect(r.id).toBe("e");
+    expect(r.t).toBeGreaterThanOrEqual(450);
+    expect(fly(flat(21, 2), [enemy(makeBody(21, 2, 0))]).t).toBeLessThan(450);
+  });
+  it("몸의 걷는 속도(v)대로 걷는다 (기사 6.6m/s)", () => {
+    const b = simulate(withAngle({ ...makeBody(10, 2, 0), v: CLASSES.KNIGHT.speed }, 0, 0), 1000);
+    expect(b.x - 10).toBeCloseTo(6.6, 5);
+    expect(simulate(withAngle(makeBody(10, 2, 0), 0, 0), 1000).x - 10).toBeCloseTo(PHYS.SPEED, 5);
   });
   it("makeArrow: 몸 가슴 높이에서 출발해 조준점 광선 위의 지점을 향한다", () => {
     const me = makeBody(10, 2, 0);

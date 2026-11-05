@@ -440,7 +440,7 @@ function onShot(m: Extract<ServerMessage, { t: "shot" }>) {
   const t = performance.now();
   if (m.by !== myId) actors.get(m.by)?.view.swing(t);
   else if (attackSentAt) { net.addRttSample(t - attackSentAt); attackSentAt = 0; }
-  world.addArrow(m.by, m.origin, m.dir, m.at);
+  world.addArrow(m.by, m.origin, m.dir, m.at, m.speed, m.range, actors.get(m.by)?.info.cls === "JAVELIN");
 }
 
 function onSwing(by: string, target: string | null) {
@@ -831,7 +831,7 @@ function renderButtons(now: number) {
   const readyAt = Math.max(mine.combat.attackReadyAt, localAttackAt + cooldown);
   const cd = Math.max(0, readyAt - now);
   $("attackBtn").classList.toggle("cooling", cd > 0 || !movable());
-  setText("attackLabel", cd > 0 ? (cd / 1000).toFixed(1) : classOf(mine).ranged ? "쏘기" : "타격");
+  setText("attackLabel", cd > 0 ? (cd / 1000).toFixed(1) : mine.cls === "JAVELIN" ? "던지기" : classOf(mine).ranged ? "쏘기" : "타격");
   $("attackCd").style.height = `${(cd / cooldown) * 100}%`;
 
   // 행동: 하고 있는 것 > 할 수 있는 것 > 비활성

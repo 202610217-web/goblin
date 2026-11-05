@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CLASSES, type ClassId } from "../../shared/classes";
 import { HostRoom, type PeerLink } from "../../client/src/host/hostRoom";
 import { makeArrow } from "../../shared/arrow";
 import { makeBody } from "../../shared/sim";
@@ -67,7 +68,7 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     const byName = (n: string) => ps.find((p: any) => p.nickname === n);
     expect(byName("손님")).toMatchObject({ cls: "ARCHER", combat: { hp: 70 } });
     expect(byName("방장")).toMatchObject({ cls: "KNIGHT", combat: { hp: 150 } });
-    for (const p of ps.filter((p: any) => p.bot)) expect(p.combat.hp).toBe(p.cls === "ARCHER" ? 70 : 150);
+    for (const p of ps.filter((p: any) => p.bot)) expect(p.combat.hp).toBe(CLASSES[p.cls as ClassId].maxHp);
     host.stop();
   });
 

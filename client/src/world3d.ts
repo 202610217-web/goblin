@@ -5,7 +5,7 @@ import { BARRIERS, BARRIER_HEIGHT, BOXES, BOXES_BY_MAP, type Box, HOUSES, MAPS, 
 import { NEON_GRID, NEON_ZONES, cellCenter } from "../../shared/neon";
 import { AIM, type Vec3, aimConverge, aimRay, clampPitch, rayAabb } from "../../shared/aim";
 import type { Body } from "../../shared/sim";
-import { ARROW, type ClassId } from "../../shared/classes";
+import type { ClassId } from "../../shared/classes";
 import { firstSolid } from "../../shared/arrow";
 import { CONFIG } from "./config";
 
@@ -281,17 +281,18 @@ export class World3D {
   }
 
   // ---------- 화살 (서버 shot 메시지대로 서버 시각 기준으로 날린다) ----------
-  private arrows: { by: string; mesh: THREE.Mesh; origin: Vec3; dir: Vec3; at: number; maxDist: number }[] = [];
+  private arrows: { by: string; mesh: THREE.Mesh; origin: Vec3; dir: Vec3; at: number; speed: number; maxDist: number }[] = [];
   private static arrowGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 5).rotateZ(-Math.PI / 2); // 길이 방향 = +X
   private static arrowMat = new THREE.MeshBasicMaterial({ color: 0xfff1b8 });
 
-  addArrow(by: string, origin: Vec3, dir: Vec3, at: number) {
+  addArrow(by: string, origin: Vec3, dir: Vec3, at: number, speed: number, range: number, spear: boolean) {
     const mesh = new THREE.Mesh(World3D.arrowGeo, World3D.arrowMat);
+    if (spear) mesh.scale.set(2, 1.4, 1.4); // 창은 더 길고 굵게
     World3D.toThree(dir.x, dir.y, dir.z, tmp);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), tmp.normalize());
     this.scene.add(mesh);
     // 벽에 닿거나 사거리 끝이면 거기서 사라진다
-    this.arrows.push({ by, mesh, origin, dir, at, maxDist: Math.min(ARROW.MAX_RANGE, firstSolid(origin, dir, 0)) });
+    this.arrows.push({ by, mesh, origin, dir, at, speed, maxDist: Math.min(range, firstSolid(origin, dir, 0)) });
   }
 
   /** 맞았다는 소식이 오면 그 사람이 쏜 가장 오래된 화살을 지운다 */
@@ -304,7 +305,7 @@ export class World3D {
 
   updateArrows(serverNow: number) {
     this.arrows = this.arrows.filter((a) => {
-      const d = (ARROW.SPEED * Math.max(0, serverNow - a.at)) / 1000;
+      const d = (a.speed * Math.max(0, serverNow - a.at)) / 1000;
       if (d > a.maxDist) { this.scene.remove(a.mesh); return false; }
       World3D.toThree(a.origin.x + a.dir.x * d, a.origin.y + a.dir.y * d, a.origin.z + a.dir.z * d, a.mesh.position);
       return true;
@@ -335,6 +336,9 @@ export class PlayerView {
     // 검: 주먹에서 앞으로 뻗은 납작한 막대 / 활: 앞으로 휜 세로 호
     sword: new THREE.BoxGeometry(0.9, 0.1, 0.03).translate(0.5, 0, 0),
     bow: new THREE.TorusGeometry(0.5, 0.03, 4, 12, Math.PI).rotateZ(-Math.PI / 2),
+    // 창: 손에서 앞뒤로 긴 막대 + 끝의 날
+    spear: new THREE.CylinderGeometry(0.03, 0.03, 2, 6).rotateZ(-Math.PI / 2).translate(0.4, 0, 0),
+    spearTip: new THREE.ConeGeometry(0.07, 0.3, 6).rotateZ(-Math.PI / 2).translate(1.55, 0, 0),
     shadow: new THREE.CircleGeometry(0.5, 20),
   };
   private static shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false });
@@ -343,6 +347,7 @@ export class PlayerView {
   private fist: THREE.Mesh;
   private sword: THREE.Mesh;
   private bow: THREE.Mesh;
+  private spear = new THREE.Group();
 
   constructor(scene: THREE.Scene, team: TeamId, nickname: string, isMe: boolean) {
     this.baseColor = new THREE.Color(CONFIG.TEAM_COLOR[team]);
@@ -359,7 +364,9 @@ export class PlayerView {
     this.sword = new THREE.Mesh(PlayerView.geo.sword, new THREE.MeshLambertMaterial({ color: 0xd8dde6 }));
     this.bow = new THREE.Mesh(PlayerView.geo.bow, wood);
     this.bow.visible = false;
-    this.fist.add(this.sword, this.bow);
+    this.spear.add(new THREE.Mesh(PlayerView.geo.spear, wood), new THREE.Mesh(PlayerView.geo.spearTip, new THREE.MeshLambertMaterial({ color: 0xc8ccd4 })));
+    this.spear.visible = false;
+    this.fist.add(this.sword, this.bow, this.spear);
     this.pivot.add(body, visor, this.fist);
     this.group.add(this.pivot);
     scene.add(this.group);
@@ -406,6 +413,7 @@ export class PlayerView {
   setWeapon(cls: ClassId) {
     this.sword.visible = cls === "KNIGHT";
     this.bow.visible = cls === "ARCHER";
+    this.spear.visible = cls === "JAVELIN";
   }
 
   /** 맞았을 때 번쩍 */

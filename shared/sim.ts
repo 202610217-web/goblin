@@ -19,6 +19,8 @@ export interface Body {
   /** 준비 시간 결계가 사라지는 서버 시각 (없으면 결계 없음). 이 시각 전까지 br 역할의 결계에 막힌다 */
   bu?: number;
   br?: BarrierRole;
+  /** 걷는 속도 (m/s, 직업별). 없으면 기본 속도 */
+  v?: number;
 }
 
 const EPS = 1e-4;
@@ -114,8 +116,9 @@ function moveAxis(b: Body, axis: "x" | "y", d: number) {
 function step(b: Body, dt: number) {
   if (b.a >= 0) {
     const v = DIRS[b.a]!;
-    moveAxis(b, "x", v[0] * PHYS.SPEED * dt);
-    moveAxis(b, "y", v[1] * PHYS.SPEED * dt);
+    const sp = b.v ?? PHYS.SPEED;
+    moveAxis(b, "x", v[0] * sp * dt);
+    moveAxis(b, "y", v[1] * sp * dt);
   }
   // 수직: 등가속도 공식(정확한 계산)으로 중력 적용 → 착지 / 천장
   let nz = b.z + b.vz * dt - 0.5 * PHYS.GRAVITY * dt * dt;
@@ -178,5 +181,6 @@ export function roundBody(b: Body): Body {
   const r = (v: number) => Math.round(v * 1000) / 1000;
   const out: Body = { x: r(b.x), y: r(b.y), z: r(b.z), vz: r(b.vz), a: b.a, g: b.g, t: b.t };
   if (b.bu !== undefined && b.t < b.bu) { out.bu = b.bu; out.br = b.br; } // 결계가 끝났으면 뺀다
+  if (b.v !== undefined) out.v = b.v;
   return out;
 }
