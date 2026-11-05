@@ -1,6 +1,6 @@
 // 결정적(deterministic) 이동 시뮬레이션. 서버와 클라이언트가 똑같이 실행한다.
 // 서버는 매 프레임 계산하지 않고, 이벤트가 올 때 "마지막 시각부터 지금까지"를 한 번에 계산한다.
-import { BOXES, type Box, PHYS } from "./world";
+import { BARRIERS, BOXES_BY_MAP, type BarrierRole, type Box, MAPS, PHYS, mapAt } from "./world";
 
 /** 캐릭터의 물리 상태 */
 export interface Body {
@@ -16,6 +16,9 @@ export interface Body {
   g: boolean;
   /** 이 상태의 서버 기준 시각 (ms) */
   t: number;
+  /** 준비 시간 결계가 사라지는 서버 시각 (없으면 결계 없음). 이 시각 전까지 br 역할의 결계에 막힌다 */
+  bu?: number;
+  br?: BarrierRole;
 }
 
 const EPS = 1e-4;
@@ -47,7 +50,7 @@ export function makeBody(x: number, y: number, t: number): Body {
 }
 
 /** 캐릭터 발판(x,y)과 상자가 수평으로 겹치는지 */
-function overlapXY(x: number, y: number, b: Box): boolean {
+function overlapXY(x: number, y: number, b: { x0: number; y0: number; x1: number; y1: number }): boolean {
   return x + H > b.x0 + EPS && x - H < b.x1 - EPS && y + H > b.y0 + EPS && y - H < b.y1 - EPS;
 }
 
@@ -56,10 +59,13 @@ function overlapZ(z: number, b: Box): boolean {
   return z < b.z1 - EPS && z + PHYS.PLAYER_HEIGHT > b.z0 + EPS;
 }
 
+/** 이 위치가 속한 맵의 상자들 */
+const boxesAt = (x: number) => BOXES_BY_MAP[mapAt(x)];
+
 /** (x,y)에서 발 높이 z 이하에 있는 가장 높은 바닥 */
 export function groundHeightAt(x: number, y: number, z: number): number {
   let g = 0;
-  for (const b of BOXES) {
+  for (const b of boxesAt(x)) {
     if (b.z1 <= z + 0.01 && b.z1 > g && overlapXY(x, y, b)) g = b.z1;
   }
   return g;
@@ -67,7 +73,7 @@ export function groundHeightAt(x: number, y: number, z: number): number {
 
 /** 머리 위 공간이 비어 있는지 (턱을 올라갈 때 확인) */
 function freeAt(x: number, y: number, z: number): boolean {
-  for (const b of BOXES) if (overlapXY(x, y, b) && overlapZ(z, b)) return false;
+  for (const b of boxesAt(x)) if (overlapXY(x, y, b) && overlapZ(z, b)) return false;
   return true;
 }
 
@@ -78,7 +84,8 @@ function moveAxis(b: Body, axis: "x" | "y", d: number) {
   if (d === 0) return;
   let nx = axis === "x" ? b.x + d : b.x;
   let ny = axis === "y" ? b.y + d : b.y;
-  for (const box of BOXES) {
+  const boxes = boxesAt(b.x);
+  for (const box of boxes) {
     if (!overlapXY(nx, ny, box) || !overlapZ(b.z, box)) continue;
     const rise = box.z1 - b.z;
     // 서 있는 상태에서 낮은 턱이고 위가 비어 있으면 올라간다
@@ -90,8 +97,17 @@ function moveAxis(b: Body, axis: "x" | "y", d: number) {
     if (axis === "x") nx = d > 0 ? box.x0 - H : box.x1 + H;
     else ny = d > 0 ? box.y0 - H : box.y1 + H;
   }
-  b.x = clamp(nx, H, PHYS.MAP_X - H);
-  b.y = clamp(ny, H, PHYS.MAP_Y - H);
+  // 준비 시간 결계: 높이와 상관없이 막는다 (해제 시각 전, 내 역할에 해당하는 것만)
+  if (b.bu !== undefined && b.t < b.bu) {
+    for (const w of BARRIERS) {
+      if ((w.role !== "all" && w.role !== b.br) || !overlapXY(nx, ny, w)) continue;
+      if (axis === "x") nx = d > 0 ? w.x0 - H : w.x1 + H;
+      else ny = d > 0 ? w.y0 - H : w.y1 + H;
+    }
+  }
+  const m = MAPS[mapAt(b.x)];
+  b.x = clamp(nx, m.x0 + H, m.x1 - H);
+  b.y = clamp(ny, m.y0 + H, m.y1 - H);
 }
 
 /** dt 초만큼 한 걸음 진행 (b를 직접 바꾼다) */
@@ -105,7 +121,7 @@ function step(b: Body, dt: number) {
   let nz = b.z + b.vz * dt - 0.5 * PHYS.GRAVITY * dt * dt;
   b.vz -= PHYS.GRAVITY * dt;
   if (b.vz > 0) {
-    for (const box of BOXES) {
+    for (const box of boxesAt(b.x)) {
       if (overlapXY(b.x, b.y, box) && box.z0 >= b.z + PHYS.PLAYER_HEIGHT - EPS && nz + PHYS.PLAYER_HEIGHT > box.z0) {
         nz = box.z0 - PHYS.PLAYER_HEIGHT;
         b.vz = 0;
@@ -160,5 +176,7 @@ export function withJump(b: Body, now: number): Body | null {
 /** 메시지 크기를 줄이기 위해 소수점 정리 (서버가 보내기 전에 사용) */
 export function roundBody(b: Body): Body {
   const r = (v: number) => Math.round(v * 1000) / 1000;
-  return { x: r(b.x), y: r(b.y), z: r(b.z), vz: r(b.vz), a: b.a, g: b.g, t: b.t };
+  const out: Body = { x: r(b.x), y: r(b.y), z: r(b.z), vz: r(b.vz), a: b.a, g: b.g, t: b.t };
+  if (b.bu !== undefined && b.t < b.bu) { out.bu = b.bu; out.br = b.br; } // 결계가 끝났으면 뺀다
+  return out;
 }
