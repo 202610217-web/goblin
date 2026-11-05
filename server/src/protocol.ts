@@ -31,6 +31,8 @@ export type ClientMessage =
   | { t: "crouch"; on: boolean; s: number; at?: number }
   /** 타격 1회. 원거리 = 카메라 방향(조준점), 근접 = 캐릭터가 바라보는 방향. 서버가 그 방향으로 맞은 사람을 판정 */
   | { t: "attack"; yaw: number; pitch: number }
+  /** 직업 스킬 (기사 이속 증가, 궁수 공속 증가) */
+  | { t: "skill" }
   /** 경기 종료 화면에서 "다시 하기" → 로비로 돌아가 다시 준비 */
   | { t: "rematch" }
   /** 로비: 빈자리를 연습용 더미로 채우기 / 더미 모두 빼기 */
@@ -124,6 +126,7 @@ export type ErrorCode =
   | "wrong_phase"
   | "debug_disabled"
   | "cannot_attack"
+  | "cannot_skill"
   | "not_owner";
 
 export type ServerMessage =
@@ -180,6 +183,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case "attack":
       if (typeof m.yaw !== "number" || typeof m.pitch !== "number" || !Number.isFinite(m.yaw) || !Number.isFinite(m.pitch)) return null;
       return { t: "attack", yaw: m.yaw, pitch: m.pitch };
+    case "skill":
+      return { t: "skill" };
     case "rematch":
       return { t: "rematch" };
     case "add_bots":

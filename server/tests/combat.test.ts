@@ -89,3 +89,18 @@ describe("고블린 은신 · 뒤치기", () => {
     expect(isBehind(t, Math.PI / 2, { x: 0, y: -1 })).toBe(true); // 북쪽을 볼 때 남쪽에서
   });
 });
+
+describe("직업 스킬", () => {
+  it("쓰는 동안만 궁수 공격 쿨다운이 0.7초, 쿨타임 전에는 다시 못 씀, 죽으면 끝남", async () => {
+    const { attackCooldownMs, CLASSES: C } = await import("../../shared/classes");
+    const { startSkill } = await import("../src/combat");
+    const c = startSkill(newCombat(), 1000, 10_000, 20_000);
+    expect(c).toMatchObject({ skillUntil: 11_000, skillReadyAt: 21_000 });
+    expect(startSkill(c, 15_000, 10_000, 20_000)).toBe(c);
+    expect(attackCooldownMs("ARCHER", c.skillUntil, 5_000)).toBe(700);
+    expect(attackCooldownMs("ARCHER", c.skillUntil, 11_000)).toBe(C.ARCHER.cooldownMs);
+    expect(attackCooldownMs("KNIGHT", c.skillUntil, 5_000)).toBe(C.KNIGHT.cooldownMs);
+    const dead = applyHit({ ...c, hp: 1 }, 3000, 10);
+    expect(dead.skillUntil).toBe(3000);
+  });
+});

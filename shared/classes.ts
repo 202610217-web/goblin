@@ -33,6 +33,18 @@ export const STEALTH = { DURATION_MS: 10_000, COOLDOWN_MS: 15_000, BACKSTAB: 1.5
 /** 데스매치: 먼저 이 킬 수에 닿은 팀이 승리 */
 export const KILL_TARGET = 15;
 
+/** 스킬 버튼: 기사 = 10초 이속 증가(쿨 15초), 궁수 = 10초 공속 증가(쿨 20초). 없는 직업은 버튼이 숨는다 */
+export const SKILLS: Partial<Record<ClassId, { durationMs: number; cooldownMs: number; speedMul?: number; attackCooldownMs?: number }>> = {
+  KNIGHT: { durationMs: 10_000, cooldownMs: 15_000, speedMul: 1.3 },
+  ARCHER: { durationMs: 10_000, cooldownMs: 20_000, attackCooldownMs: 700 },
+};
+
+/** 지금 공격 쿨다운 (궁수 스킬 중이면 짧아짐). 서버 판정과 화면이 같은 값을 쓴다 */
+export function attackCooldownMs(cls: ClassId, skillUntil: number | undefined, now: number): number {
+  const s = SKILLS[cls];
+  return s?.attackCooldownMs !== undefined && now < (skillUntil ?? 0) ? s.attackCooldownMs : CLASSES[cls].cooldownMs;
+}
+
 /** 투사체 판정 간격 (서버가 50ms마다 지나간 구간을 본다) */
 export const ARROW = { STEP_MS: 50 } as const;
 

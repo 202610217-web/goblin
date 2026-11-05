@@ -2,10 +2,10 @@
 // Durable Object 알람은 1개만 걸 수 있으므로, 여러 마감 시각을 목록으로 들고 있다가
 // 가장 가까운 시각으로 알람을 다시 건다.
 
-export type DeadlineKind = "reconnect" | "phase" | "respawn" | "bot";
+export type DeadlineKind = "reconnect" | "phase" | "respawn" | "bot" | "skill";
 
 /** 같은 시각에 겹치면 먼저 처리할 순서: 부활 > 단계 시간 초과 > 재접속 마감 > 더미 */
-const PRIORITY: Record<DeadlineKind, number> = { respawn: 0, phase: 1, reconnect: 2, bot: 3 };
+const PRIORITY: Record<DeadlineKind, number> = { respawn: 0, phase: 1, reconnect: 2, skill: 3, bot: 4 };
 
 export interface Deadline {
   kind: DeadlineKind;

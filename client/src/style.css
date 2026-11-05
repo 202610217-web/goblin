@@ -444,6 +444,12 @@ button.iconBtn { position: fixed; width: 40px; height: 40px; min-height: 40px; m
 #attackBtn { right: 0; bottom: 0; width: 104px; height: 104px; }
 #jumpBtn { right: 112px; bottom: 100px; width: 68px; height: 68px; }
 #crouchBtn { right: 128px; bottom: 8px; width: 64px; height: 64px; }
+/* 스킬: 타격 바로 위. 쓰는 중이면 밝게, 쿨타임이면 남은 초 */
+#skillBtn { right: 18px; bottom: 116px; width: 68px; height: 68px; overflow: hidden; }
+#skillBtn.on { background: rgba(232, 234, 237, 0.24); border-color: var(--fg); }
+#skillBtn.cooling .ic { opacity: 0.35; }
+#skillBtn.cooling span { font: 600 15px var(--mono); color: var(--fg); }
+#skillCd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(232, 234, 237, 0.12); }
 
 /* 폰처럼 작은 화면: 패널을 한 줄씩 */
 @media (max-width: 760px) {

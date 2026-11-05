@@ -16,6 +16,7 @@ export class Input {
   private jumpQueued = false;
   private crouchQueued = false;
   private attackQueued = false;
+  private skillQueued = false;
 
   // 터치 상태 (각 컨트롤은 처음 잡은 포인터 id만 추적)
   private stickId: number | null = null;
@@ -29,7 +30,7 @@ export class Input {
     private touchLayer: HTMLElement,
     private stickBase: HTMLElement,
     private stickKnob: HTMLElement,
-    buttons: { jump: HTMLElement; attack: HTMLElement; crouch: HTMLElement },
+    buttons: { jump: HTMLElement; attack: HTMLElement; crouch: HTMLElement; skill: HTMLElement },
   ) {
     touchLayer.addEventListener("pointerdown", (e) => this.onDown(e));
     touchLayer.addEventListener("pointermove", (e) => this.onMove(e));
@@ -39,6 +40,7 @@ export class Input {
     bindButton(buttons.jump, () => { if (this.enabled) this.jumpQueued = true; }, () => {});
     bindButton(buttons.crouch, () => { if (this.enabled) this.crouchQueued = true; }, () => {});
     bindButton(buttons.attack, () => { if (this.enabled) this.attackQueued = true; }, () => {});
+    bindButton(buttons.skill, () => { if (this.enabled) this.skillQueued = true; }, () => {});
 
     // 키보드 (개발/테스트용 보조 입력): WASD 이동, Space 점프, C 앉기, J 타격, Tab 점수판, Q/E/방향키 카메라
     window.addEventListener("keydown", (e) => {
@@ -47,6 +49,7 @@ export class Input {
       if (!e.repeat) {
         if (k === " " && this.enabled) this.jumpQueued = true;
         if (k === "j" && this.enabled) this.attackQueued = true;
+        if (k === "f" && this.enabled) this.skillQueued = true;
         if (k === "c" && this.enabled) this.crouchQueued = true;
         if (k === "tab") this.onToggleScoreboard();
       }
@@ -75,6 +78,7 @@ export class Input {
     this.stickBase.style.display = "none";
     this.jumpQueued = false;
     this.crouchQueued = false;
+    this.skillQueued = false;
     this.attackQueued = false;
   }
 
@@ -106,6 +110,12 @@ export class Input {
     const j = this.jumpQueued;
     this.jumpQueued = false;
     return j;
+  }
+
+  consumeSkill(): boolean {
+    const s = this.skillQueued;
+    this.skillQueued = false;
+    return s;
   }
 
   consumeAttack(): boolean {

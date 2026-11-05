@@ -20,6 +20,9 @@ export interface Combat {
   /** 고블린 은신이 끝나는 시각 / 다시 쓸 수 있는 시각 (예전에 저장된 방에는 없을 수 있음) */
   stealthUntil?: number;
   stealthReadyAt?: number;
+  /** 직업 스킬이 끝나는 시각 / 다시 쓸 수 있는 시각 */
+  skillUntil?: number;
+  skillReadyAt?: number;
 }
 
 /** 경기 시작 시 상태 */
@@ -30,6 +33,12 @@ export function newCombat(maxHp = MAX_HP): Combat {
 /** 전투가 가능한 단계 */
 export function isCombatPhase(phase: Phase): boolean {
   return phase === "PLAY";
+}
+
+/** 스킬 사용: 살아 있고 쿨타임이 끝났으면 durationMs 동안 켜고, 그 뒤 cooldownMs 쿨타임 (안 되면 그대로) */
+export function startSkill(c: Combat, now: number, durationMs: number, cooldownMs: number): Combat {
+  if (c.state !== "NORMAL" || now < (c.skillReadyAt ?? 0)) return c;
+  return { ...c, skillUntil: now + durationMs, skillReadyAt: now + cooldownMs };
 }
 
 /** 맞을 수 있는 상태인지 (살아 있고 무적 시간이 아님) */
@@ -55,7 +64,7 @@ export function applyHit(c: Combat, now: number, damage = HIT_DAMAGE): Combat {
   if (!isHittable(c, now)) return c;
   const hp = Math.max(0, c.hp - damage);
   if (hp > 0) return { ...c, hp };
-  return { ...endStealth(c, now), hp: 0, state: "DEAD", respawnAt: now + RESPAWN_MS, deaths: c.deaths + 1 };
+  return { ...endStealth(c, now), skillUntil: Math.min(c.skillUntil ?? 0, now), hp: 0, state: "DEAD", respawnAt: now + RESPAWN_MS, deaths: c.deaths + 1 };
 }
 
 /** 부활: 체력 가득 + 잠깐 무적. 킬/데스와 은신 쿨타임은 그대로 */

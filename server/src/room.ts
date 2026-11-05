@@ -23,7 +23,7 @@ import { type Body, angleToRad, groundHeightAt, makeBody, roundBody, simulate, w
 import { MAPS, PHYS } from "../../shared/world";
 import { NEON_SPAWNS } from "../../shared/neon";
 import { findAimTarget } from "../../shared/aim";
-import { ARROW, CLASSES, CLASS_IDS, type ClassId, STEALTH } from "../../shared/classes";
+import { ARROW, CLASSES, CLASS_IDS, type ClassId, SKILLS, STEALTH, attackCooldownMs } from "../../shared/classes";
 import { arrowSegmentHit, makeArrow } from "../../shared/arrow";
 import { type BotPlan, decide, msToWaypoint, planFor } from "./bots";
 import { inputTime } from "./lag";
@@ -38,6 +38,7 @@ import {
   isHittable,
   newCombat,
   respawn,
+  startSkill,
   startStealth,
 } from "./combat";
 import { type Deadline, nextDeadlineAt, removeDeadline, splitDue, upsertDeadline } from "./deadlines";
@@ -130,6 +131,8 @@ const ATTACK_REJECT_TEXT: Record<string, string> = {
 /** 이 플레이어의 직업 수치 */
 const cls = (p: { cls?: ClassId }) => CLASSES[p.cls ?? "KNIGHT"];
 const maxHp = (p: { cls?: ClassId }) => cls(p).maxHp;
+/** 지금 공격 쿨다운 (궁수 스킬 중이면 짧음) */
+const cooldownOf = (p: { cls?: ClassId; c: Combat }, now: number) => attackCooldownMs(p.cls ?? "KNIGHT", p.c.skillUntil, now);
 
 /** 팀 안 index번째 시작(부활) 위치에 선 물리 상태. 직업별 걷는 속도도 붙인다 */
 function spawnBody(p: { team: Team; cls?: ClassId }, index: number, now: number, map: MapId = "CLASSIC"): Body {
@@ -386,9 +389,27 @@ export class GameRoom extends DurableObject<Env> {
       }
 
       case "attack": {
-        const reason = checkAttack(player.c, st.phase, now, cls(player).cooldownMs);
+        const reason = checkAttack(player.c, st.phase, now, cooldownOf(player, now));
         if (reason) return this.sendError(ws, "cannot_attack", ATTACK_REJECT_TEXT[reason]!);
         this.performAttack(player, msg.yaw, msg.pitch, now);
+        await this.commit();
+        this.broadcastRoomState(now);
+        return;
+      }
+
+      case "skill": {
+        const skill = SKILLS[player.cls ?? "KNIGHT"];
+        if (!skill || !isCombatPhase(st.phase)) return this.sendError(ws, "cannot_skill", "지금은 스킬을 쓸 수 없어요");
+        const before = player.c.skillUntil;
+        player.c = startSkill(player.c, now, skill.durationMs, skill.cooldownMs);
+        if (player.c.skillUntil === before) return this.sendError(ws, "cannot_skill", "스킬 쿨타임이에요");
+        if (skill.speedMul) {
+          // 기사: 지금 위치에서 빠른 걸음으로 바꾸고, 끝나는 시각에 되돌린다 (물리가 몸 상태 v로 계산)
+          player.body = roundBody({ ...simulate(player.body, now), v: cls(player).speed * skill.speedMul });
+          st.deadlines = upsertDeadline(st.deadlines, { kind: "skill", key: player.id, at: player.c.skillUntil! });
+          this.broadcastMove(player);
+        }
+        this.markDirty();
         await this.commit();
         this.broadcastRoomState(now);
         return;
@@ -565,6 +586,13 @@ export class GameRoom extends DurableObject<Env> {
           else this.applyPhase(nextOnTimeout(st, d.at), d.at);
         } else if (d.kind === "bot") {
           this.botsThink(d.at);
+        } else if (d.kind === "skill") {
+          // 기사 이속 증가 끝: 원래 걷는 속도로 (부활하면서 이미 원래 속도면 그대로)
+          const p = st.players.find((x) => x.id === d.key);
+          if (p && p.body.v !== cls(p).speed) {
+            p.body = roundBody({ ...simulate(p.body, d.at), v: cls(p).speed });
+            this.broadcastMove(p);
+          }
         } else if (d.kind === "respawn") {
           this.onRespawnDue(d.key, d.at);
         } else if (d.kind === "reconnect") {
@@ -908,7 +936,9 @@ export class GameRoom extends DurableObject<Env> {
         invulnUntil: p.c.invulnUntil,
         kills: p.c.kills,
         deaths: p.c.deaths,
-        attackReadyAt: p.c.lastAttackAt + cls(p).cooldownMs,
+        attackReadyAt: p.c.lastAttackAt + cooldownOf(p, Date.now()),
+        skillUntil: p.c.skillUntil,
+        skillReadyAt: p.c.skillReadyAt,
         stealthUntil: p.c.stealthUntil,
         stealthReadyAt: p.c.stealthReadyAt,
       },

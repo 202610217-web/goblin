@@ -8,7 +8,7 @@ import { findAimTarget } from "../../shared/aim";
 // 서버와 같은 메시지 형식/규칙 수치를 그대로 쓴다 (타입은 빌드 때 지워진다)
 import type { Phase, PublicPlayer, RoomStateMessage, ServerMessage } from "../../server/src/protocol";
 import { canStartMatch } from "../../server/src/phase";
-import { CLASSES, KILL_TARGET } from "../../shared/classes";
+import { CLASSES, KILL_TARGET, SKILLS, attackCooldownMs } from "../../shared/classes";
 import { CONFIG } from "./config";
 import { Input } from "./input";
 import { Net } from "./net";
@@ -47,7 +47,7 @@ interface Actor {
 }
 
 const world = new World3D($("stage"));
-const input = new Input($("touch"), $("stickBase"), $("stickKnob"), { jump: $("jumpBtn"), attack: $("attackBtn"), crouch: $("crouchBtn") });
+const input = new Input($("touch"), $("stickBase"), $("stickKnob"), { jump: $("jumpBtn"), attack: $("attackBtn"), crouch: $("crouchBtn"), skill: $("skillBtn") });
 const net = new Net(SERVER_URL);
 
 let myId: string | null = null;
@@ -688,12 +688,23 @@ function renderButtons(now: number) {
   const mine = myInfo();
   if (!mine) return;
   $("touch").classList.toggle("spectate", inGame() && mine.combat.state !== "NORMAL");
-  const cooldown = classOf(mine).cooldownMs;
+  const cooldown = attackCooldownMs(mine.cls, mine.combat.skillUntil, now);
   const readyAt = Math.max(mine.combat.attackReadyAt, localAttackAt + cooldown);
   const cd = Math.max(0, readyAt - now);
   $("attackBtn").classList.toggle("cooling", cd > 0 || !movable());
   setText("attackLabel", cd > 0 ? (cd / 1000).toFixed(1) : mine.cls === "JAVELIN" ? "던지기" : mine.cls === "GOBLIN" ? "찌르기" : classOf(mine).ranged ? "쏘기" : "타격");
   $("attackCd").style.height = `${(cd / cooldown) * 100}%`;
+  // 스킬 버튼: 스킬 있는 직업만. 쓰는 중이면 남은 시간, 쿨타임이면 다시 쓸 때까지 남은 시간
+  const skill = SKILLS[mine.cls];
+  $("skillBtn").classList.toggle("hidden", !skill);
+  if (skill) {
+    const active = Math.max(0, (mine.combat.skillUntil ?? 0) - now);
+    const scd = Math.max(0, (mine.combat.skillReadyAt ?? 0) - now);
+    $("skillBtn").classList.toggle("on", active > 0);
+    $("skillBtn").classList.toggle("cooling", active === 0 && (scd > 0 || !movable()));
+    setText("skillLabel", active > 0 ? `${Math.ceil(active / 1000)}초` : scd > 0 ? (scd / 1000).toFixed(1) : mine.cls === "KNIGHT" ? "질주" : "속사");
+    $("skillCd").style.height = `${active > 0 ? 0 : (scd / skill.cooldownMs) * 100}%`;
+  }
 }
 
 /** 죽었을 때: 부활까지 남은 초 + 누구에게 당했는지 */
@@ -782,11 +793,13 @@ function frame() {
       lastSentSeq = seq;
     }
     $("crouchBtn").classList.toggle("on", !!m.body.k);
+    // 4-2) 스킬 (쿨타임·적용은 서버가 판단, 결과는 room_state/move로 온다)
+    if (input.consumeSkill() && movable() && myNormal() && SKILLS[m.info.cls] && now >= (m.info.combat.skillReadyAt ?? 0)) net.send({ t: "skill" });
     // 5) 타격 (1회 = 메시지 1개). 원거리는 조준점(카메라) 방향, 근접은 캐릭터가 바라보는 방향으로. 판정은 서버가 같은 방향으로 한다
     if (input.consumeAttack()) attackBufferedUntil = now + CONFIG.ATTACK_BUFFER_MS;
     if (now <= attackBufferedUntil) {
       const ranged = classOf(m.info).ranged;
-      const readyAt = Math.max(m.info.combat.attackReadyAt, localAttackAt + classOf(m.info).cooldownMs);
+      const readyAt = Math.max(m.info.combat.attackReadyAt, localAttackAt + attackCooldownMs(m.info.cls, m.info.combat.skillUntil, now));
       if (movable() && myNormal() && now >= readyAt) {
         const yaw = ranged ? world.yaw : m.face;
         net.send({ t: "attack", yaw, pitch: world.pitch });
