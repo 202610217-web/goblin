@@ -1,6 +1,6 @@
 {
-  "name": "집 부수기 3D",
-  "short_name": "집 부수기",
+  "name": "LSMM",
+  "short_name": "LSMM",
   "description": "친구들과 2대2로 집을 부수고 지키는 3D 모바일 게임",
   "start_url": "./",
   "scope": "./",
