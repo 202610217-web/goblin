@@ -75,6 +75,15 @@ export function attackCooldownMs(cls: ClassId, skillUntil: number | undefined, n
   return s?.attackCooldownMs !== undefined && now < (skillUntil ?? 0) ? s.attackCooldownMs : CLASSES[cls].cooldownMs;
 }
 
+/** 연속 처치: 죽지 않고 EVERY킬마다 궁극기 +ULT_BONUS%. 연속 BOUNTY_MIN킬 이상인 적을 잡으면 현상금 +BOUNTY_ULT% */
+export const STREAK = { EVERY: 3, ULT_BONUS: 30, BOUNTY_MIN: 3, BOUNTY_ULT: 50 } as const;
+
+/** 파워업 종류: 체력 가득 / POWER_MS 동안 데미지 POWER_MUL배 / 궁극기 +ULT% */
+export type PickupKind = "heal" | "power" | "ult";
+/** 파워업: 경기 시작 RESPAWN_MS 뒤 맵 가운데에 생기고, 누가 먹으면 RESPAWN_MS 뒤 다시 생긴다. 발이 PICK_RANGE m 안이면 먹음 */
+export const PICKUP = { RESPAWN_MS: 30_000, PICK_RANGE: 1.4, POWER_MS: 10_000, POWER_MUL: 1.5, ULT: 50 } as const;
+export const PICKUP_KINDS: PickupKind[] = ["heal", "power", "ult"];
+
 /** 투사체 판정 간격 (서버가 50ms마다 지나간 구간을 본다) */
 export const ARROW = { STEP_MS: 50 } as const;
 

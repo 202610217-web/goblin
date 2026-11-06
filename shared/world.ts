@@ -2,7 +2,7 @@
 // (같은 값으로 같은 계산을 해야 클라이언트 예측이 서버와 맞기 때문에 shared/ 에 둔다)
 // 좌표계: x = 동(오른쪽), y = 북(앞쪽), z = 위. 단위는 미터.
 
-import { NEON_GRID, cellRectToWorld, mergeCells } from "./neon";
+import { NEON_GRID, cellCenter, cellRectToWorld, mergeCells } from "./neon";
 
 export type TeamId = "A" | "B";
 /** 맵 종류. 두 맵은 한 좌표 공간에 떨어져 있어서 위치만 보고도 어느 맵인지 안다 */
@@ -152,6 +152,9 @@ function buildNeon(): Box[] {
 export const BOXES_BY_MAP: Record<MapId, readonly Box[]> = { CLASSIC: buildBoxes(), NEON: buildNeon() };
 /** 모든 맵의 상자 (조준/화살/카메라 광선: 다른 맵은 멀리 떨어져 있어 영향 없음) */
 export const BOXES: readonly Box[] = [...BOXES_BY_MAP.CLASSIC, ...BOXES_BY_MAP.NEON];
+
+/** 파워업이 생기는 자리 (맵 가운데): 기본 맵 = 가운데 단상 위, NEON = 광장 분수 옆 */
+export const PICKUP_SPOTS: Record<MapId, { x: number; y: number }> = { CLASSIC: { x: 24, y: 14 }, NEON: cellCenter(24, 14) };
 
 /** NEON 목표 건물 (사이트별) */
 export const SITES = Object.fromEntries(

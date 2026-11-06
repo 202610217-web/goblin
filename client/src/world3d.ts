@@ -672,6 +672,41 @@ export class World3D {
     }
   }
 
+  // ---------- 맵 가운데 파워업: 떠서 도는 보석 + 바닥 고리 (종류별 색) ----------
+  private pickup: { g: THREE.Group; key: string } | null = null;
+  static PICKUP_COLOR = { heal: 0x4dff88, power: 0xff5a3c, ult: 0x5ab8ff } as const;
+  setPickup(p: { kind: keyof typeof World3D.PICKUP_COLOR; x: number; y: number; z: number } | null, serverNow: number) {
+    const key = p ? `${p.kind},${p.x},${p.y}` : "";
+    if (this.pickup && this.pickup.key !== key) {
+      this.scene.remove(this.pickup.g);
+      this.pickup.g.traverse((o) => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); (o.material as THREE.Material).dispose(); } });
+      this.pickup = null;
+    }
+    if (!p) return;
+    if (!this.pickup) {
+      const color = World3D.PICKUP_COLOR[p.kind];
+      const g = new THREE.Group();
+      World3D.toThree(p.x, p.y, p.z, g.position);
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.42, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(1.5), toneMapped: false }));
+      const ring = new THREE.Mesh(new THREE.RingGeometry(1.1, 1.3, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthWrite: false, toneMapped: false }));
+      ring.position.y = 0.05;
+      g.add(gem, ring);
+      this.scene.add(g);
+      this.pickup = { g, key };
+    }
+    const [gem, ring] = this.pickup.g.children as [THREE.Mesh, THREE.Mesh];
+    gem.position.y = 1.1 + Math.sin(serverNow / 300) * 0.15;
+    gem.rotation.y = serverNow / 400;
+    ring.scale.setScalar(1 + 0.08 * Math.sin(serverNow / 200));
+  }
+
+  /** 파워업을 먹은 자리: 그 색으로 별 폭발 + 고리 */
+  pickupBurst(kind: keyof typeof World3D.PICKUP_COLOR, x: number, y: number, z: number, at: number) {
+    const pos = World3D.toThree(x, y, z + 1.1, new THREE.Vector3());
+    this.fx.burst(pos, World3D.PICKUP_COLOR[kind], 1.6, at);
+    this.fx.shock(pos.clone().setY(pos.y - 1.1), World3D.PICKUP_COLOR[kind], 3, at);
+  }
+
   updateUlts(serverNow: number) {
     this.fx.update(serverNow, this.camera);
     this.rains = this.rains.filter((r) => {

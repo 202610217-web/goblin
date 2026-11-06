@@ -20,17 +20,20 @@ import {
   SPAWNS,
 } from "./constants";
 import { type Body, angleToRad, groundHeightAt, makeBody, roundBody, simulate, withAngle, withCrouch, withJump } from "../../shared/sim";
-import { MAPS, PHYS } from "../../shared/world";
+import { MAPS, PHYS, PICKUP_SPOTS } from "../../shared/world";
 import { NEON_SPAWNS } from "../../shared/neon";
 import { findAimTarget } from "../../shared/aim";
-import { ARROW, CLASSES, CLASS_IDS, type ClassId, SKILLS, STEALTH, ULTS, ULT_PER_DAMAGE, attackCooldownMs } from "../../shared/classes";
+import { ARROW, CLASSES, CLASS_IDS, type ClassId, PICKUP, PICKUP_KINDS, SKILLS, STEALTH, ULTS, ULT_PER_DAMAGE, attackCooldownMs } from "../../shared/classes";
 import { arrowSegmentHit, firstSolid, makeArrow } from "../../shared/arrow";
 import { type BotPlan, decide, msToWaypoint, planFor } from "./bots";
 import { inputTime } from "./lag";
 import { type Score, addKill, killWinner, timeUpWinner } from "./score";
 import {
   type Combat,
+  addKillStreak,
   applyHit,
+  powered,
+  takePickup,
   checkAttack,
   endStealth,
   isBehind,
@@ -64,6 +67,7 @@ import {
   type Team,
   type UsageStats,
   parseClientMessage,
+  type Pickup,
   type Smoke,
 } from "./protocol";
 
@@ -107,6 +111,8 @@ interface RoomState extends PhaseState {
   deadlines: Deadline[];
   /** 고블린 연막 (예전에 저장된 방에는 없을 수 있음) */
   smokes?: Smoke[];
+  /** 맵 가운데 파워업 (예전에 저장된 방에는 없을 수 있음) */
+  pickup?: Pickup | null;
 }
 
 /** 소켓마다 붙여두는 정보 (Hibernation 후에도 유지됨) */
@@ -430,6 +436,11 @@ export class GameRoom extends DurableObject<Env> {
         return;
       }
 
+      case "pickup": {
+        if (this.tryPickup(player, now)) { await this.commit(); this.broadcastRoomState(now); }
+        return;
+      }
+
       case "ult": {
         const ult = ULTS[player.cls ?? "KNIGHT"];
         if (!ult || !isCombatPhase(st.phase) || player.c.state !== "NORMAL") return this.sendError(ws, "cannot_ult", "지금은 궁극기를 쓸 수 없어요");
@@ -636,6 +647,11 @@ export class GameRoom extends DurableObject<Env> {
           // 기사 질주 / 발 묶는 창이 끝남: 그 시각의 걷는 속도로 (key = 플레이어 id, 느려짐은 "slow:" + id)
           const p = st.players.find((x) => x.id === d.key.replace("slow:", ""));
           if (p) this.applySpeed(p, d.at);
+        } else if (d.kind === "pickup") {
+          if (st.phase === "PLAY") {
+            const spot = PICKUP_SPOTS[st.map ?? "CLASSIC"];
+            st.pickup = { kind: PICKUP_KINDS[Math.floor(Math.random() * PICKUP_KINDS.length)]!, ...spot, z: groundHeightAt(spot.x, spot.y, 9) };
+          }
         } else if (d.kind === "respawn") {
           this.onRespawnDue(d.key, d.at);
         } else if (d.kind === "reconnect") {
@@ -708,7 +724,10 @@ export class GameRoom extends DurableObject<Env> {
   /** charge = 준 피해만큼 궁극기 게이지를 채울지 (궁극기 자신은 안 채움) */
   private landHit(by: string, target: PlayerRecord | null, now: number, damage: number, charge = true) {
     const st = this.state!;
+    const by0 = st.players.find((p) => p.id === by);
+    if (by0) damage = powered(by0.c, damage, now); // 파워업 강화 중이면 1.5배
     if (target) {
+      const victimStreak = target.c.streak ?? 0;
       const wasAlive = target.c.state === "NORMAL";
       const hp0 = target.c.hp;
       target.c = applyHit(target.c, now, damage);
@@ -718,7 +737,9 @@ export class GameRoom extends DurableObject<Env> {
       if (wasAlive && target.c.state === "DEAD") {
         const killer = st.players.find((p) => p.id === by);
         if (killer) {
-          killer.c = { ...killer.c, kills: killer.c.kills + 1 };
+          const r = addKillStreak(killer.c, victimStreak);
+          killer.c = r.c;
+          if (r.milestone || r.bounty) this.broadcast({ t: "streak", by, victim: target.id, streak: r.c.streak!, bounty: r.bounty, serverTime: now });
           st.score = addKill(st.score, killer.team);
         }
         st.deadlines = upsertDeadline(st.deadlines, { kind: "respawn", key: target.id, at: target.c.respawnAt! });
@@ -728,6 +749,20 @@ export class GameRoom extends DurableObject<Env> {
     this.broadcast({ t: "swing", by, target: target?.id ?? null, serverTime: now, damage: target ? damage : 0 });
     const winner = killWinner(st.score);
     if (winner) this.endMatch(winner, "score", now);
+  }
+
+  /** 파워업 먹기: 경기 중, 살아 있고, 발이 파워업 옆(가로 PICK_RANGE, 높이 1.2m 안)이면. 먹으면 RESPAWN_MS 뒤 다시 생김 */
+  private tryPickup(p: PlayerRecord, now: number): boolean {
+    const st = this.state!, pk = st.pickup;
+    if (!pk || st.phase !== "PLAY" || p.c.state !== "NORMAL") return false;
+    const b = simulate(p.body, now);
+    if (Math.hypot(b.x - pk.x, b.y - pk.y) > PICKUP.PICK_RANGE || Math.abs(b.z - pk.z) > 1.2) return false;
+    p.c = takePickup(p.c, pk.kind, now, maxHp(p));
+    st.pickup = null;
+    st.deadlines = upsertDeadline(st.deadlines, { kind: "pickup", key: "pickup", at: now + PICKUP.RESPAWN_MS });
+    this.broadcast({ t: "picked", by: p.id, kind: pk.kind, serverTime: now });
+    this.markDirty();
+    return true;
   }
 
   /** 화살: 쏜 걸 알리고 50ms마다 지나간 구간을 판정. 메모리 타이머만 쓰고 저장하지 않는다 (0.4초면 끝남) */
@@ -830,6 +865,7 @@ export class GameRoom extends DurableObject<Env> {
         changed = true;
         if (!canMoveIn(st.phase)) return; // 15킬로 경기가 끝났으면 그만
       }
+      if (this.tryPickup(bot, now)) changed = true; // 지나가다 밟으면 먹는다
       if (d.arrived) {
         // 길 끝: 상대 진영 ↔ 맵 가운데를 오가며 순찰
         const slot = st.players.filter((q) => q.bot && q.team === bot.team).indexOf(bot);
@@ -886,7 +922,10 @@ export class GameRoom extends DurableObject<Env> {
       for (const p of st.players) { p.ready = false; p.c = newCombat(maxHp(p)); }
       Object.assign(st, freshMatch());
     }
-    if (st.phase !== "PLAY") st.deadlines = st.deadlines.filter((d) => d.kind !== "respawn");
+    if (st.phase !== "PLAY") {
+      st.deadlines = st.deadlines.filter((d) => d.kind !== "respawn" && d.kind !== "pickup");
+      st.pickup = null;
+    }
     if (phaseChanged && st.phase === "COUNTDOWN") {
       // 시작 직전: 고른 직업의 체력으로, 팀별 시작 위치에 (킬/데스 0)
       for (const team of ["A", "B"] as const) {
@@ -904,6 +943,7 @@ export class GameRoom extends DurableObject<Env> {
       : upsertDeadline(st.deadlines, { kind: "phase", key: "phase", at: st.phaseEndsAt });
     // 더미: 경기가 시작되면 순찰 계획을 세우고 생각하기 시작, 아니면 멈춤
     if (phaseChanged && st.phase === "PLAY") {
+      st.deadlines = upsertDeadline(st.deadlines, { kind: "pickup", key: "pickup", at: now + PICKUP.RESPAWN_MS });
       for (const team of ["A", "B"] as const) {
         st.players.filter((p) => p.bot && p.team === team).forEach((p, i) => {
           p.plan = planFor(team, i, st.map ?? "CLASSIC", simulate(p.body, now));
@@ -1041,6 +1081,8 @@ export class GameRoom extends DurableObject<Env> {
         ult: p.c.ult ?? 0,
         stealthUntil: p.c.stealthUntil,
         stealthReadyAt: p.c.stealthReadyAt,
+        streak: p.c.streak ?? 0,
+        powerUntil: p.c.powerUntil,
       },
       bot: !!p.bot,
       cls: p.cls ?? "KNIGHT",
@@ -1063,6 +1105,7 @@ export class GameRoom extends DurableObject<Env> {
       matchEndReason: st.matchEndReason,
       practice: st.practice,
       smokes: (st.smokes ?? []).filter((s) => s.until > now),
+      pickup: st.pickup ?? null,
       players: this.publicPlayers(),
       serverTime: now,
     });

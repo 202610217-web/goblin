@@ -4,11 +4,12 @@ import { SPAWNS, type TeamId } from "../../shared/world";
 import { Minimap } from "./minimap";
 import { setHighQuality } from "./graphics";
 import { damageDirection, damageNumber, feed, hitMarker } from "./hudfx";
+import { play } from "./sfx";
 import { findAimTarget } from "../../shared/aim";
 // 서버와 같은 메시지 형식/규칙 수치를 그대로 쓴다 (타입은 빌드 때 지워진다)
 import type { Phase, PublicPlayer, RoomStateMessage, ServerMessage } from "../../server/src/protocol";
 import { canStartMatch } from "../../server/src/phase";
-import { CLASSES, KILL_TARGET, SKILLS, ULTS, attackCooldownMs } from "../../shared/classes";
+import { CLASSES, KILL_TARGET, PICKUP, SKILLS, ULTS, attackCooldownMs } from "../../shared/classes";
 import { CONFIG } from "./config";
 import { Input } from "./input";
 import { Net } from "./net";
@@ -75,6 +76,7 @@ const sentAt = new Map<number, number>();
 let attackSentAt = 0;
 /** 서버 판정 전에 미리 번쩍이게 한 상대 */
 let predictedHit: string | null = null;
+let pickupSentAt = 0;
 /** 핑 진단: 내가 들어온 Cloudflare 위치 → 방 서버 위치 */
 let route = "";
 /** 쿨다운 중에 누른 타격을 이 시각까지 기억 (서버 시각) */
@@ -312,7 +314,26 @@ net.onMessage = (m) => {
     case "ult":
       if (m.kind === "sword") world.addUlt(m.x, m.y, m.z, m.serverTime);
       else if (m.kind === "rain") world.addRain(m.x, m.y, m.z, m.radius ?? 3, m.serverTime);
+      play("ult");
       break;
+    case "streak": {
+      const e = m as Extract<ServerMessage, { t: "streak" }>;
+      const who = e.by === myId ? "나" : actors.get(e.by)?.info.nickname ?? "?";
+      const text = e.bounty ? `💰 ${who} 현상금 획득! (궁극기 +50%)` : `🔥 ${who} ${e.streak}연속 처치! (궁극기 +30%)`;
+      feed($("feed"), text, "up");
+      if (e.by === myId) { toast(text); play("streak"); }
+      break;
+    }
+    case "picked": {
+      const e = m as Extract<ServerMessage, { t: "picked" }>;
+      const a = actors.get(e.by);
+      const what = { heal: "체력 회복", power: "10초 공격력 ×1.5", ult: "궁극기 +50%" }[e.kind];
+      feed($("feed"), `💎 ${e.by === myId ? "나" : a?.info.nickname ?? "?"} 파워업: ${what}`, "info");
+      const pk = room?.pickup;
+      if (pk) world.pickupBurst(e.kind, pk.x, pk.y, pk.z, e.serverTime);
+      play("pickup");
+      break;
+    }
     case "shot":
       onShot(m as Extract<ServerMessage, { t: "shot" }>);
       break;
@@ -360,7 +381,11 @@ function announceStates(prev: RoomStateMessage, next: RoomStateMessage) {
   };
   for (const p of next.players) {
     const before = prev.players.find((x) => x.id === p.id)?.combat.state;
-    if (before === "NORMAL" && p.combat.state === "DEAD") feed($("feed"), `${name(lastHitBy.get(p.id))} → ${name(p.id)}`, "dead");
+    if (before === "NORMAL" && p.combat.state === "DEAD") {
+      feed($("feed"), `${name(lastHitBy.get(p.id))} → ${name(p.id)}`, "dead");
+      if (lastHitBy.get(p.id) === myId) play("kill");
+    }
+    if (p.id === myId && (prev.players.find((x) => x.id === p.id)?.combat.ult ?? 0) < 100 && (p.combat.ult ?? 0) >= 100) play("ready");
   }
 }
 
@@ -440,6 +465,7 @@ function onShot(m: Extract<ServerMessage, { t: "shot" }>) {
   const t = performance.now();
   if (m.by !== myId) actors.get(m.by)?.view.swing(t);
   else if (attackSentAt) { net.addRttSample(t - attackSentAt); attackSentAt = 0; }
+  play("shot");
   world.addArrow(m.by, m.origin, m.dir, m.at, m.speed, m.range, actors.get(m.by)?.info.cls === "JAVELIN", !!m.big);
 }
 
@@ -452,7 +478,8 @@ function onSwing(by: string, target: string | null, damage: number) {
     lastHitBy.set(target, by);
     const victim = actors.get(target);
     if (victim) damageNumber(victim.view.label, damage); // 서버가 계산한 값 (고블린 뒤치기는 1.5배)
-    if (by === myId) hitMarker($("crosshair"));
+    if (by === myId) { hitMarker($("crosshair")); play("hit"); }
+    if (target === myId) play("hurt");
     const m = me(), atk = actors.get(by);
     if (target === myId && m && atk) {
       const rel = Math.atan2(atk.body.y - m.body.y, atk.body.x - m.body.x) - world.yaw;
@@ -465,7 +492,7 @@ function onSwing(by: string, target: string | null, damage: number) {
     if (target) actors.get(target)?.view.flash(t);
     return;
   }
-  if (by !== myId) actors.get(by)?.view.swing(t); // 내 동작은 누르는 순간 이미 보여줬다
+  if (by !== myId) { actors.get(by)?.view.swing(t); play("swing"); } // 내 동작은 누르는 순간 이미 보여줬다
   else if (attackSentAt) { net.addRttSample(t - attackSentAt); attackSentAt = 0; }
   // 내가 때린 건 이미 번쩍였으면 다시 하지 않는다
   if (target && !(by === myId && target === predictedHit)) actors.get(target)?.view.flash(t);
@@ -651,6 +678,7 @@ function statusText(p: PublicPlayer, now: number): string {
   if (p.conn === "RECONNECTING") return "재접속 중";
   if (p.combat.state === "DEAD") return p.combat.respawnAt && movable() ? `부활 ${Math.max(0, Math.ceil((p.combat.respawnAt - now) / 1000))}초` : "사망";
   if (now < (p.combat.slowUntil ?? 0)) return "느려짐";
+  if (now < (p.combat.powerUntil ?? 0)) return `⚡강화 ${Math.ceil((p.combat.powerUntil! - now) / 1000)}초`;
   if (now < (p.combat.stealthUntil ?? 0)) return `은신 ${Math.ceil((p.combat.stealthUntil! - now) / 1000)}초`;
   if (p.id === myId && now < (p.combat.stealthReadyAt ?? 0)) return `은신 대기 ${Math.ceil((p.combat.stealthReadyAt! - now) / 1000)}초`;
   return "";
@@ -833,6 +861,7 @@ function frame() {
         localAttackAt = now;
         attackBufferedUntil = -Infinity;
         m.view.swing(t);
+        if (!ranged) play("swing"); // 활·창은 서버 shot에서 소리
       }
     }
   } else {
@@ -877,7 +906,14 @@ function frame() {
   if (!watch) world.updateCamera(24, 14 - 8, 0); // 입장 전: 맵 가운데를 비춤
   world.updateArrows(now);
   world.updateUlts(now);
-  world.setSmokes(smokes, now, m?.team); // 고블린 연막: 우리 팀 것은 옅게, 상대 것은 짙게
+  world.setSmokes(smokes, now, m?.team);
+  const pk = (inGame() && room?.pickup) || null;
+  world.setPickup(pk, now);
+  // 파워업 옆에 서면 먹겠다고 알린다 (거리는 서버가 다시 확인, 0.3초에 한 번까지)
+  if (pk && m && myNormal() && t - pickupSentAt > 300 && Math.hypot(m.body.x - pk.x, m.body.y - pk.y) <= PICKUP.PICK_RANGE && Math.abs(m.body.z - pk.z) <= 1.2) {
+    net.send({ t: "pickup" });
+    pickupSentAt = t;
+  } // 고블린 연막: 우리 팀 것은 옅게, 상대 것은 짙게
   world.render();
   for (const a of actors.values()) a.view.placeLabel(world.camera, w, h);
 
@@ -910,7 +946,7 @@ if (OFFLINE) {
   const t0 = net.serverNow();
   applyRoomState({
     t: "room_state", room: "연습", phase: "PLAY", phaseEndsAt: null,
-    map: "CLASSIC", score: { A: 0, B: 0 }, matchWinner: null, matchEndReason: null, practice: true, smokes: [],
+    map: "CLASSIC", score: { A: 0, B: 0 }, matchWinner: null, matchEndReason: null, practice: true, smokes: [], pickup: null,
     serverTime: t0,
     players: [{
       id: "me", nickname: "연습", team: "A", conn: "CONNECTED", reconnectDeadline: null, ready: true,

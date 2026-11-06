@@ -3,7 +3,7 @@
 import { type Body, isValidAngle } from "../../shared/sim";
 export type { Body };
 import type { Combat } from "./combat";
-import { type ClassId, isClassId } from "../../shared/classes";
+import { type ClassId, type PickupKind, isClassId } from "../../shared/classes";
 import type { Vec3 } from "../../shared/aim";
 import { type MapId, isMapId } from "../../shared/world";
 export type { MapId };
@@ -35,6 +35,8 @@ export type ClientMessage =
   | { t: "skill" }
   /** 궁극기 (게이지 100%일 때). 근접 = 캐릭터가 바라보는 방향, 원거리 = 카메라(조준점) 방향 */
   | { t: "ult"; yaw: number; pitch: number }
+  /** 맵 가운데 파워업 먹기 (가까이 있을 때 화면이 보낸다. 거리는 서버가 다시 확인) */
+  | { t: "pickup" }
   /** 경기 종료 화면에서 "다시 하기" → 로비로 돌아가 다시 준비 */
   | { t: "rematch" }
   /** 로비: 빈자리를 연습용 더미로 채우기 / 더미 모두 빼기 */
@@ -104,7 +106,11 @@ export interface RoomStateMessage {
   serverTime: number;
   /** 고블린 연막 (끝나지 않은 것만) */
   smokes: Smoke[];
+  /** 맵 가운데 파워업 (없으면 null) */
+  pickup: Pickup | null;
 }
+
+export interface Pickup { kind: PickupKind; x: number; y: number; z: number }
 
 /** 무료 한도 점검용 카운터 */
 export interface UsageStats {
@@ -149,6 +155,10 @@ export type ServerMessage =
   /** 누군가 타격했을 때 (target = 맞은 사람, 빗나가면 null). 체력 변화·킬은 함께 오는 room_state로 반영 */
   /** 궁극기가 떨어짐 (화면 효과용). 데미지는 swing으로 따로 온다 */
   | { t: "ult"; kind: "sword" | "rain" | "smoke"; by: string; target?: string; x: number; y: number; z: number; serverTime: number; radius?: number }
+  /** 연속 처치 보상(streak = 죽지 않고 이어 온 킬 수) 또는 현상금(bounty = 연속 처치 중인 적을 잡음) */
+  | { t: "streak"; by: string; victim: string; streak: number; bounty: boolean; serverTime: number }
+  /** 누가 파워업을 먹음 */
+  | { t: "picked"; by: string; kind: PickupKind; serverTime: number }
   | { t: "swing"; by: string; target: string | null; serverTime: number; /** 실제로 들어간 데미지 (뒤치기 1.5배 포함) */ damage: number }
   /** 궁수가 쐈을 때 (화면이 같은 화살을 그림). at = 쏜 서버 시각. 맞으면 swing(target)이 따로 온다 */
   | { t: "shot"; by: string; origin: Vec3; dir: Vec3; at: number; speed: number; range: number; /** 궁극기 거대 창 */ big?: boolean }
@@ -197,6 +207,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return { t: "skill" };
     case "ult":
       return typeof m.yaw === "number" && Number.isFinite(m.yaw) ? { t: "ult", yaw: m.yaw, pitch: typeof m.pitch === "number" && Number.isFinite(m.pitch) ? m.pitch : 0 } : null;
+    case "pickup":
+      return { t: "pickup" };
     case "rematch":
       return { t: "rematch" };
     case "add_bots":

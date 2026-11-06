@@ -1,6 +1,6 @@
 // 전투 규칙 (순수 함수): 체력, 타격, 사망과 부활, 고블린 은신·뒤치기
 import { ATTACK_COOLDOWN_MS, HIT_DAMAGE, MAX_HP, RESPAWN_INVULN_MS, RESPAWN_MS } from "./constants";
-import { STEALTH } from "../../shared/classes";
+import { PICKUP, type PickupKind, STEALTH, STREAK } from "../../shared/classes";
 import type { Phase } from "./protocol";
 
 export type LifeState = "NORMAL" | "DEAD";
@@ -29,7 +29,31 @@ export interface Combat {
   slowMul?: number;
   /** 궁극기 게이지 0~100 (%) */
   ult?: number;
+  /** 죽지 않고 이어 온 킬 수 (죽으면 0) */
+  streak?: number;
+  /** 파워업 강화(데미지 배수)가 끝나는 시각 */
+  powerUntil?: number;
 }
+
+/** 킬 하나 반영: 연속 처치 수와 궁극기 보너스(EVERY킬마다 + 현상금). 보상 받았는지도 돌려준다 */
+export function addKillStreak(killer: Combat, victimStreak: number): { c: Combat; milestone: boolean; bounty: boolean } {
+  const streak = (killer.streak ?? 0) + 1;
+  const milestone = streak % STREAK.EVERY === 0;
+  const bounty = victimStreak >= STREAK.BOUNTY_MIN;
+  const ult = Math.min(100, (killer.ult ?? 0) + (milestone ? STREAK.ULT_BONUS : 0) + (bounty ? STREAK.BOUNTY_ULT : 0));
+  return { c: { ...killer, kills: killer.kills + 1, streak, ult }, milestone, bounty };
+}
+
+/** 파워업 먹기 (살아 있을 때만, 아니면 그대로) */
+export function takePickup(c: Combat, kind: PickupKind, now: number, maxHp: number): Combat {
+  if (c.state !== "NORMAL") return c;
+  if (kind === "heal") return { ...c, hp: maxHp };
+  if (kind === "power") return { ...c, powerUntil: now + PICKUP.POWER_MS };
+  return { ...c, ult: Math.min(100, (c.ult ?? 0) + PICKUP.ULT) };
+}
+
+/** 파워업 강화 중이면 데미지에 배수 */
+export const powered = (c: Combat, damage: number, now: number) => ((c.powerUntil ?? 0) > now ? Math.round(damage * PICKUP.POWER_MUL) : damage);
 
 /** 경기 시작 시 상태 */
 export function newCombat(maxHp = MAX_HP): Combat {
@@ -70,7 +94,7 @@ export function applyHit(c: Combat, now: number, damage = HIT_DAMAGE): Combat {
   if (!isHittable(c, now)) return c;
   const hp = Math.max(0, c.hp - damage);
   if (hp > 0) return { ...c, hp };
-  return { ...endStealth(c, now), skillUntil: Math.min(c.skillUntil ?? 0, now), hp: 0, state: "DEAD", respawnAt: now + RESPAWN_MS, deaths: c.deaths + 1 };
+  return { ...endStealth(c, now), skillUntil: Math.min(c.skillUntil ?? 0, now), powerUntil: undefined, streak: 0, hp: 0, state: "DEAD", respawnAt: now + RESPAWN_MS, deaths: c.deaths + 1 };
 }
 
 /** 부활: 체력 가득 + 잠깐 무적. 킬/데스와 은신 쿨타임은 그대로 */
