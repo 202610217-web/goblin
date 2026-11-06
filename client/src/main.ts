@@ -754,13 +754,15 @@ let fpsCheckAt = performance.now() + 3000;
 function frame() {
   requestAnimationFrame(frame);
   const t = performance.now();
+  // 120Hz 화면에서도 필요 이상으로 그리지 않는다 (발열). 2ms 여유는 60Hz 화면에서 프레임을 건너뛰지 않게
+  if (t - lastFrame < 1000 / (inGame() ? CONFIG.FPS_CAP_GAME : CONFIG.FPS_CAP_MENU) - 2) return;
   const dt = Math.min(0.1, (t - lastFrame) / 1000);
   if (t > lastFrame) fps += ((1000 / (t - lastFrame)) - fps) * 0.05;
   lastFrame = t;
   // 2초마다: 느리면 해상도를 조금 낮춘다 (고해상도 패드에서 끊김 방지)
   if (t > fpsCheckAt) {
     fpsCheckAt = t + 2000;
-    if (fps < CONFIG.FPS_TARGET && world.pixelRatio > CONFIG.MIN_DPR && !document.hidden) {
+    if (inGame() && fps < CONFIG.FPS_TARGET && world.pixelRatio > CONFIG.MIN_DPR && !document.hidden) { // 로비는 30fps로 묶어 두므로 경기 중에만
       world.setPixelRatio(Math.max(CONFIG.MIN_DPR, world.pixelRatio - CONFIG.DPR_STEP));
     }
   }

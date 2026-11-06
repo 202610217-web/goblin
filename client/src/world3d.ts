@@ -29,8 +29,10 @@ export class World3D {
   pitch: number = CONFIG.CAMERA_PITCH_DEFAULT;
 
   constructor(container: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, CONFIG.MAX_DPR));
+    // 폰·패드: 계단 현상 보정(antialias)과 높은 해상도가 발열의 큰 원인이라 낮춘다
+    const touch = matchMedia("(pointer: coarse)").matches;
+    this.renderer = new THREE.WebGLRenderer({ antialias: !touch, powerPreference: touch ? "default" : "high-performance" });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, touch ? CONFIG.MAX_DPR_TOUCH : CONFIG.MAX_DPR));
     container.appendChild(this.renderer.domElement);
     this.camera = new THREE.PerspectiveCamera(CONFIG.CAMERA_FOV, 16 / 9, 0.1, 600);
     // 물리 하늘 + 하늘로 구운 환경광 + 해 그림자 + (고화질) 블룸

@@ -1,7 +1,11 @@
 // 클라이언트 UI/연출 수치 (게임 규칙 수치는 서버 constants.ts, 이동 물리는 shared/world.ts)
 export const CONFIG = {
-  /** 렌더링 해상도 배율 상한 (성능) */
+  /** 렌더링 해상도 배율 상한 (성능). 폰·패드는 발열 때문에 더 낮게 */
   MAX_DPR: 2,
+  MAX_DPR_TOUCH: 1.5,
+  /** 화면 그리기 상한 (fps): 120Hz 패드도 경기 중 60, 로비·메뉴는 30 (발열·배터리) */
+  FPS_CAP_GAME: 60,
+  FPS_CAP_MENU: 30,
   /** 자동 화질 조절: 이 fps보다 낮으면 해상도 배율을 STEP만큼 낮춘다 (최소 MIN_DPR) */
   FPS_TARGET: 45,
   DPR_STEP: 0.25,
