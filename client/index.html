@@ -74,6 +74,7 @@
         <h3 class="sub">설정</h3>
         <label class="check"><input type="checkbox" id="vibrateToggle" /> 맞으면 진동</label>
         <label class="check"><input type="checkbox" id="gfxToggle" /> 고화질 (그림자 · 빛 번짐)</label>
+        <button id="layoutBtn" class="secondary">버튼 배치 바꾸기</button>
       </section>
     </div>
   </div>
@@ -135,6 +136,9 @@
       <div id="attackBtn" class="gameBtn" aria-label="타격"><svg class="ic" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 17.5L3 6V3H6L17.5 14.5"/><path d="M13 19L19 13"/><path d="M16 16L20 20"/><path d="M19 21L21 19"/></svg><span id="attackLabel">타격</span><div id="attackCd"></div></div>
     </div>
   </div>
+
+  <!-- 버튼 배치 편집 중 위쪽 막대 -->
+  <div id="layoutBar" class="hidden"><span>버튼을 끌어서 옮기세요</span><button id="layoutReset" class="secondary">초기화</button><button id="layoutDone">완료</button></div>
 
   <!-- 죽었을 때: 부활까지 남은 시간 -->
   <div id="downOverlay" class="hidden">

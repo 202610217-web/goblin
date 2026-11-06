@@ -5,6 +5,7 @@ import { Minimap } from "./minimap";
 import { setHighQuality } from "./graphics";
 import { damageDirection, damageNumber, feed, hitMarker } from "./hudfx";
 import { play } from "./sfx";
+import { setupLayoutEditor } from "./layout";
 import { findAimTarget } from "../../shared/aim";
 // 서버와 같은 메시지 형식/규칙 수치를 그대로 쓴다 (타입은 빌드 때 지워진다)
 import type { Phase, PublicPlayer, RoomStateMessage, ServerMessage } from "../../server/src/protocol";
@@ -192,6 +193,7 @@ $("leaveBtn").onclick = () => {
   try { sessionStorage.removeItem(tokenKey()); } catch { /* 무시 */ }
   goToJoin("");
 };
+setupLayoutEditor($("layoutBtn"), $("layoutBar"), $("layoutReset"), $("layoutDone"));
 const vib = $<HTMLInputElement>("vibrateToggle");
 vib.checked = vibrationEnabled();
 vib.onchange = () => { setVibration(vib.checked); if (vib.checked) vibrate(CONFIG.VIBRATE_HIT); };

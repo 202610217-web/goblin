@@ -468,3 +468,10 @@ button.iconBtn { position: fixed; width: 40px; height: 40px; min-height: 40px; m
   .classCard small, .classCard .stats { display: none; }
   .team { min-height: 0; }
 }
+
+/* 버튼 배치 편집: 패널을 숨기고 모든 버튼을 점선으로 보여 준다 */
+body.editLayout .panel { display: none !important; }
+body.editLayout #touch.hidden, body.editLayout #touch { display: block !important; background: rgba(11, 13, 16, 0.6); }
+body.editLayout #buttons .gameBtn { display: flex !important; outline: 2px dashed var(--fg); outline-offset: 4px; cursor: grab; }
+#layoutBar { position: fixed; top: calc(var(--safe-t, 0px) + 16px); left: 50%; transform: translateX(-50%); z-index: 30; display: flex; gap: 10px; align-items: center; padding: 10px 14px; background: rgba(14, 16, 20, 0.94); border: 1px solid var(--line); border-radius: 8px; }
+#layoutBar span { color: var(--muted); margin-right: 6px; white-space: nowrap; }
