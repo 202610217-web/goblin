@@ -514,7 +514,7 @@ export class World3D {
   }
 
   // ---------- 화살 (서버 shot 메시지대로 서버 시각 기준으로 날린다) ----------
-  private arrows: { by: string; mesh: THREE.Object3D; origin: Vec3; dir: Vec3; at: number; speed: number; maxDist: number; big: boolean }[] = [];
+  private arrows: { by: string; mesh: THREE.Object3D; origin: Vec3; dir: Vec3; at: number; speed: number; maxDist: number; big: boolean; wall: boolean; half: number; stuck: boolean }[] = [];
   /** 궁극기 Stylized 이펙트 (폭발·충격파·불꽃·균열·속도선) */
   private fx = new StylizedFx(this.scene);
   private static arrowGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 5); // 모델을 받기 전 막대 (길이 방향 = +Y)
@@ -533,13 +533,15 @@ export class World3D {
     World3D.toThree(dir.x, dir.y, dir.z, tmp);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tmp.normalize());
     this.scene.add(mesh);
-    // 벽에 닿거나 사거리 끝이면 거기서 사라진다
-    this.arrows.push({ by, mesh, origin, dir, at, speed, maxDist: Math.min(range, firstSolid(origin, dir, 0)), big });
+    // 벽·땅에 닿으면 촉이 박힌 채 잠시 남고, 허공에서 사거리 끝이면 사라진다
+    const wall = firstSolid(origin, dir, 0);
+    const half = (model ? new THREE.Box3().setFromObject(model).getSize(tmp).y / 2 : 0.5) * (big ? 2.5 : 1); // 모델 길이 방향 = +Y
+    this.arrows.push({ by, mesh, origin, dir, at, speed, maxDist: Math.min(range, wall), big, wall: wall <= range, half, stuck: false });
   }
 
   /** 맞았다는 소식이 오면 그 사람이 쏜 가장 오래된 화살을 지운다 */
   removeArrow(by: string) {
-    const i = this.arrows.findIndex((a) => a.by === by);
+    const i = this.arrows.findIndex((a) => a.by === by && !a.stuck); // 벽에 박혀 있는 건 빼고
     if (i < 0) return;
     const a = this.arrows[i]!;
     if (a.big) this.spearImpact(a.mesh.position, this.lastNow); // 맞은 자리에서 바로
@@ -750,8 +752,14 @@ export class World3D {
   updateArrows(serverNow: number) {
     this.lastNow = serverNow;
     this.arrows = this.arrows.filter((a) => {
-      const d = (a.speed * Math.max(0, serverNow - a.at)) / 1000;
-      if (d > a.maxDist) { if (a.big) this.spearImpact(a.mesh.position, serverNow); this.scene.remove(a.mesh); return false; }
+      let d = (a.speed * Math.max(0, serverNow - a.at)) / 1000;
+      if (d > a.maxDist) {
+        if (!a.stuck && a.big) this.spearImpact(a.mesh.position, serverNow);
+        const stuckFor = serverNow - a.at - (a.maxDist / a.speed) * 1000;
+        if (!a.wall || a.big || stuckFor > 3000) { this.scene.remove(a.mesh); return false; }
+        a.stuck = true;
+        d = a.maxDist - a.half * 0.3; // 촉 쪽이 벽 속에 들어가게
+      }
       World3D.toThree(a.origin.x + a.dir.x * d, a.origin.y + a.dir.y * d, a.origin.z + a.dir.z * d, a.mesh.position);
       return true;
     });

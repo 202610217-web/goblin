@@ -8,6 +8,8 @@ import { PHYS } from "../../shared/world";
 
 const FILE: Record<ClassId, string> = { KNIGHT: "knight", ARCHER: "rogue_hooded", JAVELIN: "barbarian", GOBLIN: "rogue" };
 /** 공격 동작 (직업별) */
+/** 화살·창은 서버에서 누르는 즉시 날아가므로, 동작도 손을 놓기 직전부터 재생한다 (클립 시각 초: 활 0.33초, 던지기 0.70초에 놓음) */
+const ATTACK_FROM: Partial<Record<ClassId, number>> = { ARCHER: 0.22, JAVELIN: 0.58 };
 const ATTACK: Record<ClassId, string> = { KNIGHT: "1H_Melee_Attack_Slice_Diagonal", ARCHER: "2H_Ranged_Shoot", JAVELIN: "Throw", GOBLIN: "1H_Melee_Attack_Stab" };
 
 export type Pose = "idle" | "walk" | "run" | "air" | "down" | "dead";
@@ -194,7 +196,7 @@ export class Character {
   }
 
   /** 한 번만 재생하고 원래 동작으로 돌아가는 동작 */
-  private playOnce(name: string, timeScale: number) {
+  private playOnce(name: string, timeScale: number, from = 0) {
     if (!this.ready || this.pose === "down" || this.pose === "dead") return;
     const a = this.actions.get(name);
     if (!a) return;
@@ -204,10 +206,11 @@ export class Character {
     this.oneShot = a;
     this.current?.fadeOut(0.08);
     a.reset().setEffectiveWeight(1).fadeIn(0.08).play();
+    a.time = from;
     this.current = a;
   }
 
-  attack() { this.playOnce(ATTACK[this.cls], 1.5); }
+  attack() { this.playOnce(ATTACK[this.cls], 1.5, ATTACK_FROM[this.cls]); }
   hit() { if (!this.oneShot) this.playOnce("Hit_A", 1.6); }
 
   /** 번쩍임(맞음) · 투명도(기절·무적·재접속) · 회색(사망) */
