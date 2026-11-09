@@ -1,6 +1,6 @@
 // 게임 진입점: 입장 → 로비 → 게임 화면 (이동/점프/타격/집 작업/치유/관전) → 라운드/경기 종료
 import { type Body, angleToRad, groundHeightAt, makeBody, radToAngle, simulate, withAngle, withCrouch, withJump } from "../../shared/sim";
-import { SPAWNS, type TeamId } from "../../shared/world";
+import { PHYS, SPAWNS, type TeamId } from "../../shared/world";
 import { Minimap } from "./minimap";
 import { setHighQuality } from "./graphics";
 import { damageDirection, damageNumber, feed, hitMarker } from "./hudfx";
@@ -66,6 +66,8 @@ const actors = new Map<string, Actor>();
 let seq = 0;
 let lastSentSeq = 0;
 let lastSentA = -2;
+/** 마지막으로 보낸 바라보는 방향 (카메라, 각도 단계) */
+let lastSentF = -1;
 let lastMoveSendAt = 0;
 /** 이동 의도가 마지막으로 바뀐 서버 기준 시각 (화면 예측에 쓴 시각 = 서버에 보내는 시각) */
 let prevWant = -2;
@@ -198,6 +200,16 @@ const vib = $<HTMLInputElement>("vibrateToggle");
 vib.checked = vibrationEnabled();
 vib.onchange = () => { setVibration(vib.checked); if (vib.checked) vibrate(CONFIG.VIBRATE_HIT); };
 $("giveUpBtn").onclick = () => goToJoin("");
+// 화면 감도 (모바일 배그처럼 설정에서 조절, 기기에 저장)
+const sens = $<HTMLInputElement>("sensRange");
+const loadSens = () => { try { return Number(localStorage.getItem("camSens")) || 1; } catch { return 1; } };
+const applySens = (v: number) => {
+  input.sensitivity = Math.min(CONFIG.CAMERA_SENS_MAX, Math.max(CONFIG.CAMERA_SENS_MIN, v));
+  sens.value = String(input.sensitivity);
+  setText("sensValue", `${input.sensitivity.toFixed(1)}×`);
+};
+applySens(loadSens());
+sens.oninput = () => { applySens(Number(sens.value)); try { localStorage.setItem("camSens", sens.value); } catch { /* 저장 못 하는 환경 */ } };
 // 고화질 그래픽 (기본: 컴퓨터 켬, 폰·패드 끔. 기기에 저장)
 const gfx = $<HTMLInputElement>("gfxToggle");
 gfx.checked = world.light.high;
@@ -810,12 +822,18 @@ function frame() {
     // 1) 이동 의도 전송: 바뀔 때만, 최소 간격 유지 (서버가 이동 불가 단계에서도 의도를 기억함)
     const want = desiredAngle();
     if (want !== prevWant) { prevWant = want; wantChangedAt = now; }
-    if (want !== lastSentA && t - lastMoveSendAt >= CONFIG.MOVE_SEND_INTERVAL_MS) {
+    // 바라보는 방향 = 카메라 방향 (모바일 배그처럼). 다른 사람 화면과 뒤치기 판정에 쓰여서 같이 보낸다
+    const steps = PHYS.ANGLE_STEPS;
+    const wantF = ((Math.round((world.yaw / (Math.PI * 2)) * steps) % steps) + steps) % steps;
+    const since = t - lastMoveSendAt;
+    // 이동이 바뀌면 200ms 간격, 바라보는 방향만 바뀌면 300ms 간격 (서버 이동 메시지 한도 초당 5개 안)
+    if ((want !== lastSentA && since >= CONFIG.MOVE_SEND_INTERVAL_MS) || (wantF !== lastSentF && since >= CONFIG.FACE_SEND_INTERVAL_MS)) {
       // at = 화면에서 방향을 바꾼 시각. 서버가 같은 시각으로 계산해서 위치가 어긋나지 않는다
-      net.send({ t: "move", a: want, s: ++seq, at: wantChangedAt });
+      net.send({ t: "move", a: want, s: ++seq, at: want !== lastSentA ? wantChangedAt : now, f: wantF });
       sentAt.set(seq, t);
       lastSentSeq = seq;
       lastSentA = want;
+      lastSentF = wantF;
       lastMoveSendAt = t;
     }
     // 2) 내 캐릭터 예측: 입력을 즉시 반영
@@ -880,8 +898,10 @@ function frame() {
   for (const [id, a] of actors) {
     if (id !== myId) a.body = simulate(a.body, now);
     a.off.x *= decay; a.off.y *= decay; a.off.z *= decay;
-    if (a.body.a >= 0) { // 이동 방향으로 부드럽게 돌기 (한 번에 확 꺾이지 않게, 가까운 쪽으로)
-      const d = angleToRad(a.body.a) - a.face;
+    // 바라보는 방향: 나는 카메라 방향 그대로, 다른 사람은 받은 카메라 방향(f)으로 부드럽게 (더미는 걷는 방향)
+    if (id === myId) a.face = world.yaw;
+    else if (a.body.f !== undefined || a.body.a >= 0) {
+      const d = angleToRad(a.body.f ?? a.body.a) - a.face;
       a.face += Math.atan2(Math.sin(d), Math.cos(d)) * (1 - Math.exp(-dt * CONFIG.TURN_SPEED));
     }
     const x = a.body.x + a.off.x, y = a.body.y + a.off.y, z = Math.max(0, a.body.z + a.off.z);

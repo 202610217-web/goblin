@@ -274,6 +274,8 @@ input { font: 400 18px var(--font); border-radius: 6px; border: 1px solid var(--
 .panel label { font-size: 16px; }
 .panel label.check { justify-content: flex-start; gap: 12px; }
 .check input { width: 20px; height: 20px; accent-color: var(--fg); }
+.check.sens input { width: 160px; height: 28px; }
+.check.sens b { min-width: 2.5em; font: 600 14px var(--mono); }
 
 /* 버튼 (Figma Button: Primary / Secondary / Ghost, 높이 48, 모서리 6) */
 button {

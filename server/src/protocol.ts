@@ -24,7 +24,7 @@ export type ClientMessage =
   | { t: "set_team"; team: Team }
   | { t: "set_ready"; ready: boolean } // 로비 준비 완료/취소
   /** 이동 방향 각도 단계 (-1=정지, 0~31, shared/sim.ts 참고). 방향이 바뀔 때만 보낸다. s = 입력 순번 */
-  | { t: "move"; a: number; s: number; at?: number }
+  | { t: "move"; a: number; s: number; at?: number; /** 바라보는 방향 (카메라, 0~63) */ f?: number }
   /** 점프 (땅에 있을 때만 서버가 허용). at = 화면에서 누른 서버 기준 시각 (지연 보정, 최대 0.5초 전까지) */
   | { t: "jump"; s: number; at?: number }
   /** 앉기(on=true) / 일어서기. s, at은 점프와 같음 */
@@ -193,7 +193,7 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return { t: "set_ready", ready: m.ready };
     case "move":
       if (!isValidAngle(m.a) || !isSeq(m.s)) return null;
-      return { t: "move", a: m.a, s: m.s, at: isTime(m.at) ? m.at : undefined };
+      return { t: "move", a: m.a, s: m.s, at: isTime(m.at) ? m.at : undefined, f: isValidAngle(m.f) && m.f >= 0 ? m.f : undefined };
     case "jump":
       if (!isSeq(m.s)) return null;
       return { t: "jump", s: m.s, at: isTime(m.at) ? m.at : undefined };

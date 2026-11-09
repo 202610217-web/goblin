@@ -235,6 +235,26 @@ describe("내 기기로 방 열기 (서버 방 코드를 브라우저 어댑터�
     host.stop();
   });
 
+  it("바라보는 방향(카메라)은 이동 메시지의 f로 오고, 걷지 않아도 뒤치기 판정에 쓰인다", async () => {
+    const host = new HostRoom("FACE", { DEBUG_COMMANDS: "true" });
+    const a = fakePeer(), b = fakePeer();
+    host.addPeer(a, "HOST"); host.addPeer(b, "P2P");
+    await tick();
+    a.push({ t: "join", nickname: "기사" }); b.push({ t: "join", nickname: "고블린" });
+    await tick(5);
+    a.push({ t: "start_practice" }); await tick(5);
+    b.push({ t: "set_class", cls: "GOBLIN" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "COUNTDOWN" }); await tick(5);
+    a.push({ t: "debug_phase", phase: "PLAY" }); await tick(5);
+    const aId = last(a, "welcome").playerId;
+    a.push({ t: "debug_teleport", x: 15, y: 2 }); b.push({ t: "debug_teleport", x: 14, y: 2 }); await tick(5);
+    a.push({ t: "move", a: -1, s: 1, f: 0 }); await tick(5); // 제자리에서 동쪽(0)을 봄
+    expect(last(b, "move")).toMatchObject({ id: aId, body: { a: -1, f: 0 } });
+    b.push({ t: "attack", yaw: 0, pitch: 0.3 }); await tick(5); // 서쪽(등 뒤)에서
+    expect(last(a, "swing")).toMatchObject({ target: aId, damage: Math.round(CLASSES.GOBLIN.damage * 1.5) });
+    host.stop();
+  });
+
   it("고블린이 등 뒤에서 찌르면 1.5배 (swing에 실제 데미지), 앞에서는 기본 데미지", async () => {
     const host = new HostRoom("BACK", { DEBUG_COMMANDS: "true" });
     const a = fakePeer(), b = fakePeer();

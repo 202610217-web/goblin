@@ -17,6 +17,8 @@ export class Input {
   private crouchQueued = false;
   private attackQueued = false;
   private skillQueued = false;
+  /** 화면 감도 배율 (설정, 기본 1) */
+  sensitivity = 1;
   private ultQueued = false;
 
   // 터치 상태 (각 컨트롤은 처음 잡은 포인터 id만 추적)
@@ -99,8 +101,8 @@ export class Input {
     this.moveY = this.enabled ? q.y : 0;
     const rot = (k.has("arrowleft") || k.has("q") ? 1 : 0) - (k.has("arrowright") || k.has("e") ? 1 : 0);
     const tilt = (k.has("arrowup") ? 1 : 0) - (k.has("arrowdown") ? 1 : 0);
-    this.yawDelta += rot * CONFIG.CAMERA_KEY_SPEED * dt;
-    this.pitchDelta += tilt * CONFIG.CAMERA_KEY_SPEED * 0.5 * dt;
+    this.yawDelta += rot * CONFIG.CAMERA_KEY_SPEED * this.sensitivity * dt;
+    this.pitchDelta += tilt * CONFIG.CAMERA_KEY_SPEED * 0.5 * this.sensitivity * dt;
   }
 
   /** 앉기 버튼을 눌렀는지 (누를 때마다 앉기/일어서기 전환) */
@@ -171,8 +173,8 @@ export class Input {
       const m = Math.min(1, len / R);
       this.touchStick = m < CONFIG.JOYSTICK_DEADZONE ? { x: 0, y: 0 } : { x: dx / R, y: -dy / R };
     } else if (e.pointerId === this.camId) {
-      this.yawDelta -= (e.clientX - this.camLast.x) * CONFIG.CAMERA_DRAG_SENSITIVITY;
-      this.pitchDelta += (e.clientY - this.camLast.y) * CONFIG.CAMERA_DRAG_SENSITIVITY;
+      this.yawDelta -= (e.clientX - this.camLast.x) * CONFIG.CAMERA_DRAG_SENSITIVITY * this.sensitivity;
+      this.pitchDelta += (e.clientY - this.camLast.y) * CONFIG.CAMERA_DRAG_SENSITIVITY * this.sensitivity;
       this.camLast = { x: e.clientX, y: e.clientY };
     }
   }

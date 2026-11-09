@@ -27,6 +27,9 @@ export const CONFIG = {
   CAMERA_FADE_RATIO: 0.3,
   /** 화면 드래그 1px당 카메라 회전(라디안), 키보드 회전 속도(라디안/초) */
   CAMERA_DRAG_SENSITIVITY: 0.006,
+  /** 설정의 화면 감도 배율 범위 (기본 1) */
+  CAMERA_SENS_MIN: 0.3,
+  CAMERA_SENS_MAX: 2.5,
   CAMERA_KEY_SPEED: 2.4,
   /** 조이스틱: 최대 반경(px), 데드존(0~1) */
   JOYSTICK_RADIUS: 60,
@@ -35,6 +38,8 @@ export const CONFIG = {
   TURN_SPEED: 14,
   /** 이동 메시지 최소 간격 (초당 최대 5회) */
   MOVE_SEND_INTERVAL_MS: 200,
+  /** 바라보는 방향만 바뀌었을 때 보내는 최소 간격 */
+  FACE_SEND_INTERVAL_MS: 300,
   /** ping 간격 (20초 이하) */
   PING_INTERVAL_MS: 15_000,
   /** 핑 표시에 쓰는 최근 표본 수 (중간값) */

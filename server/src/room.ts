@@ -388,6 +388,7 @@ export class GameRoom extends DurableObject<Env> {
           // 이동 불가 단계면 정지 상태 유지 (원하는 방향만 기억)
           const a = movable ? msg.a : -1;
           if (a !== player.body.a) player.body = roundBody(withAngle(player.body, a, at));
+          if (msg.f !== undefined && msg.f !== player.body.f) player.body = { ...player.body, f: msg.f }; // 바라보는 방향 (물리와 무관)
         } else if (msg.t === "crouch") {
           if (movable || !msg.on) player.body = roundBody(withCrouch(player.body, msg.on, at)); // 일어서기는 언제나
         } else if (movable) {
@@ -714,7 +715,8 @@ export class GameRoom extends DurableObject<Env> {
       .map((p) => ({ id: p.id, body: simulate(p.body, now), p }));
     const hit = findAimTarget(me, yaw, pitch, candidates);
     // 고블린 뒤치기: 대상이 바라보는 방향(움직이는 방향, 멈췄으면 마지막 방향)의 등 뒤에서 맞히면 1.5배
-    const faceA = hit ? (hit.p.body.a >= 0 ? hit.p.body.a : hit.p.faceA) : undefined;
+    // 바라보는 방향: 사람은 카메라 방향(body.f), 더미는 걷는 방향 (멈췄으면 마지막 방향)
+    const faceA = hit ? (hit.p.body.f ?? (hit.p.body.a >= 0 ? hit.p.body.a : hit.p.faceA)) : undefined;
     const back = !!hit && !!cls(player).sneaky && faceA !== undefined && isBehind(hit.body, angleToRad(faceA), me);
     this.landHit(player.id, hit?.p ?? null, now, Math.round(cls(player).damage * (back ? STEALTH.BACKSTAB : 1)));
     return hit?.p ?? null;

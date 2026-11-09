@@ -20,6 +20,8 @@ export interface Body {
   v?: number;
   /** 앉아 있는지 (키가 낮아지고 느려짐) */
   k?: boolean;
+  /** 바라보는 방향 각도 단계 (카메라 방향, 이동과 무관. 물리에는 영향 없음) */
+  f?: number;
 }
 
 /** 지금 몸의 키 (앉으면 낮아짐) */
@@ -195,5 +197,6 @@ export function roundBody(b: Body): Body {
   const out: Body = { x: r(b.x), y: r(b.y), z: r(b.z), vz: r(b.vz), a: b.a, g: b.g, t: b.t };
   if (b.v !== undefined) out.v = b.v;
   if (b.k) out.k = true;
+  if (b.f !== undefined) out.f = b.f;
   return out;
 }
