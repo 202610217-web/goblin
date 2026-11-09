@@ -1,5 +1,5 @@
-// 실사 그래픽: Poly Haven(CC0) 사진 재질, 물리 기반 하늘(대기 산란) + 그 하늘로 구운 환경광, 해 그림자, 블룸.
-// 자원은 tools/fetch_polyhaven.py 가 client/public/ph/ 에 받아 둔 것. 늦게 와도 게임은 바로 시작하고 사진이 나중에 입혀진다.
+// 실사 그래픽: Poly Haven · ambientCG · ShareTextures(모두 CC0) 사진 재질, 물리 기반 하늘(대기 산란) + 그 하늘로 구운 환경광, 해 그림자, 블룸.
+// 재질은 tools/fetch_textures.py, 모델은 tools/fetch_polyhaven.py 가 client/public/ph/ 에 받아 둔 것. 늦게 와도 게임은 바로 시작하고 사진이 나중에 입혀진다.
 import * as THREE from "three";
 import { Sky } from "three/examples/jsm/objects/Sky.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -8,6 +8,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import type { MapId } from "../../shared/world";
+import { TEX_SIZE } from "./texsizes";
 
 const PH = `${import.meta.env.BASE_URL}ph/`;
 const loader = new THREE.TextureLoader();
@@ -27,25 +28,32 @@ export function setHighQuality(on: boolean) {
 
 // ---------- 사진 재질 ----------
 const texCache = new Map<string, THREE.Texture>();
-function tex(file: string, color: boolean): THREE.Texture {
-  let t = texCache.get(file);
+/** 모든 메시의 UV는 m 단위라서, 사진 한 장이 실제 크기(TEX_SIZE)만큼 덮이도록 반복 횟수를 정한다 */
+/** scale < 1 이면 그만큼 작게 깐다 (낙엽 사진을 수풀 잎으로 쓸 때처럼 실제 크기와 다르게 써야 할 때만) */
+function tex(id: string, kind: string, color: boolean, scale = 1): THREE.Texture {
+  const file = `${id}_${kind}.jpg`, key = `${file}@${scale}`;
+  let t = texCache.get(key);
   if (!t) {
-    t = loader.load(PH + file);
+    t = loader.load(PH + file); // 크기만 다른 같은 사진은 브라우저 캐시에서 온다
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    const [w, h] = TEX_SIZE[id] ?? [2, 2];
+    t.repeat.set(1 / (w * scale), 1 / (h * scale));
     t.anisotropy = 8;
     if (color) t.colorSpace = THREE.SRGBColorSpace;
-    texCache.set(file, t);
+    texCache.set(key, t);
   }
   return t;
 }
 
-/** Poly Haven 재질 (색·노멀·거칠기). tint = 사진 위에 곱하는 색 */
-export function photoMat(id: string, opts: { tint?: number; metal?: number; emissive?: number; normal?: number } = {}): THREE.MeshStandardMaterial {
+/** 사진 재질 (색·노멀·거칠기·AO). tint = 사진 위에 곱하는 색 */
+export function photoMat(id: string, opts: { tint?: number; metal?: number; emissive?: number; normal?: number; scale?: number } = {}): THREE.MeshStandardMaterial {
+  const s = opts.scale ?? 1;
   return new THREE.MeshStandardMaterial({
-    map: tex(`${id}_diff.jpg`, true),
-    normalMap: tex(`${id}_nor.jpg`, false),
+    map: tex(id, "diff", true, s),
+    normalMap: tex(id, "nor", false, s),
     normalScale: new THREE.Vector2(opts.normal ?? 1, opts.normal ?? 1),
-    roughnessMap: tex(`${id}_rough.jpg`, false),
+    roughnessMap: tex(id, "rough", false, s),
+    aoMap: tex(id, "ao", false, s), // 틈새·줄눈이 어두워져 입체감 (Three r152+는 uv 그대로 씀)
     color: opts.tint ?? 0xffffff,
     metalness: opts.metal ?? 0,
     emissive: opts.emissive ?? 0x000000,
@@ -53,26 +61,37 @@ export function photoMat(id: string, opts: { tint?: number; metal?: number; emis
 }
 
 /**
- * 상자 모양 + 실제 크기(m)에 맞춘 UV: 사진 한 장이 tile 미터를 덮도록 면마다 늘린다 (큰 건물도 무늬가 늘어나지 않음).
- * 크기는 Three 좌표 (sx = 동서, sy = 높이, sz = 남북)
+ * 상자 모양 + 월드 좌표(m) UV. cx, cy, cz = 상자가 놓일 가운데 (Three 좌표, 메시 position과 같은 값).
+ * 옆면은 땅(높이 0)에서 무늬가 시작하고 가로는 월드 좌표를 따라서, 붙어 있는 상자·위아래 상자끼리 벽돌 줄과 이음매가 이어진다.
+ * 면마다 바깥에서 볼 때 u = 오른쪽, v = 위 (노멀 지도 빛 방향이 면마다 뒤집히지 않게).
  */
-export function boxGeo(sx: number, sy: number, sz: number, tile: number): THREE.BoxGeometry {
+export function boxGeo(sx: number, sy: number, sz: number, cx = 0, cy = sy / 2, cz = 0): THREE.BoxGeometry {
   const g = new THREE.BoxGeometry(sx, sy, sz);
-  const uv = g.attributes.uv!;
-  // BoxGeometry 면 순서: +x, -x, +y, -y, +z, -z (면마다 정점 4개). 각 면의 (가로, 세로) 실제 길이
-  const faces: [number, number][] = [[sz, sy], [sz, sy], [sx, sz], [sx, sz], [sx, sy], [sx, sy]];
-  for (let f = 0; f < 6; f++) {
-    const [w, h] = faces[f]!;
-    for (let i = f * 4; i < f * 4 + 4; i++) uv.setXY(i, (uv.getX(i) * w) / tile, (uv.getY(i) * h) / tile);
+  const pos = g.attributes.position!, nor = g.attributes.normal!, uv = g.attributes.uv!;
+  for (let i = 0; i < uv.count; i++) {
+    const x = pos.getX(i) + cx, y = pos.getY(i) + cy, z = pos.getZ(i) + cz;
+    const nx = nor.getX(i), ny = nor.getY(i), nz = nor.getZ(i);
+    if (ny > 0.5) uv.setXY(i, x, -z);
+    else if (ny < -0.5) uv.setXY(i, x, z);
+    else if (nx > 0.5) uv.setXY(i, -z, y);
+    else if (nx < -0.5) uv.setXY(i, z, y);
+    else uv.setXY(i, nz > 0 ? x : -x, y);
   }
   return g;
 }
 
-/** 바닥 판: 사진 한 장이 tile 미터 */
-export function groundGeo(w: number, h: number, tile: number): THREE.PlaneGeometry {
+/** 판 (w × h m) + m 단위 UV. 바닥이면 x, y = 판 가운데 지도 좌표 → 이웃 바닥과 무늬가 이어진다 */
+export function groundGeo(w: number, h: number, x = 0, y = 0): THREE.PlaneGeometry {
   const g = new THREE.PlaneGeometry(w, h);
+  const pos = g.attributes.position!, uv = g.attributes.uv!;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) + x, pos.getY(i) + y);
+  return g;
+}
+
+/** 원래 0~1인 UV를 실제 길이(m)로 늘린다 (원기둥·원뿔·공: u = 둘레, v = 높이) */
+export function meterUV<T extends THREE.BufferGeometry>(g: T, u: number, v: number): T {
   const uv = g.attributes.uv!;
-  for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * w) / tile, (uv.getY(i) * h) / tile);
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * u, uv.getY(i) * v);
   return g;
 }
 
