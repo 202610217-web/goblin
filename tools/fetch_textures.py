@@ -11,7 +11,7 @@ OUT = os.path.join(ROOT, "client", "public", "ph")
 SIZES_TS = os.path.join(ROOT, "client", "src", "texsizes.ts")
 
 POLYHAVEN = ["asphalt_02", "concrete_wall_008", "concrete_block_wall", "forest_leaves_02", "brown_planks_03",
-             "red_brick_03", "bark_brown_02", "patterned_concrete_pavers", "leafy_grass", "metal_plate"]
+             "red_brick_03", "bark_brown_02", "patterned_concrete_pavers", "leafy_grass", "metal_plate", "cliff_side"]
 AMBIENTCG = ["Bricks085", "PaintedPlaster017", "Concrete034", "PavingStones128", "RoofingTiles006", "Planks037A",
              "CorrugatedSteel005"]
 # ambientCG가 크기를 안 알려 주는 재질: 무늬를 보고 정한 사진 한 장의 실제 가로 m (세로는 사진 비율대로)

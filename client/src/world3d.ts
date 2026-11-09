@@ -9,7 +9,7 @@ import type { Body } from "../../shared/sim";
 import type { ClassId } from "../../shared/classes";
 import { firstSolid } from "../../shared/arrow";
 import { CONFIG } from "./config";
-import { Lighting, WINDOW, boxGeo, fitTo, groundGeo, meterUV, model, photoMat, windowMat } from "./graphics";
+import { Lighting, WINDOW, boxGeo, groundGeo, meterUV, model, photoMat, windowMat } from "./graphics";
 import { Character, PROPS, type Pose } from "./characters";
 import { StylizedFx } from "./ultfx";
 
@@ -88,43 +88,55 @@ export class World3D {
   }
   private map: MapId | null = null;
 
-  /** 그림자를 드리우고 받는 상자 하나 */
-  private addBox(g: THREE.Group, b: Box, mat: THREE.Material): THREE.Mesh {
+  /** 그림자를 드리우고 받는 상자 하나 (같은 재질끼리 flushPieces에서 한 메시로 합쳐 그리기 호출을 줄인다) */
+  private addBox(b: Box, mat: THREE.Material) {
     const cx = (b.x0 + b.x1) / 2, cy = (b.z0 + b.z1) / 2, cz = -(b.y0 + b.y1) / 2;
-    const m = new THREE.Mesh(boxGeo(b.x1 - b.x0, b.z1 - b.z0, b.y1 - b.y0, cx, cy, cz), mat);
-    m.position.set(cx, cy, cz);
-    m.castShadow = m.receiveShadow = true;
-    g.add(m);
-    return m;
+    this.piece(mat, boxGeo(b.x1 - b.x0, b.z1 - b.z0, b.y1 - b.y0, cx, cy, cz), cx, cy, cz);
   }
 
-  /** 나무 상자: 사진 재질 상자를 먼저 그려 두고, 모델이 오면 바꾼다 */
-  private addCrate(g: THREE.Group, b: Box, fallback: THREE.Material) {
-    const box = this.addBox(g, b, fallback);
-    model("wooden_crate_02").then((o) => {
-      const w = fitTo(o, b.x1 - b.x0, b.z1 - b.z0, b.y1 - b.y0);
-      w.position.set((b.x0 + b.x1) / 2, b.z0, -(b.y0 + b.y1) / 2);
-      g.add(w);
-      box.visible = false;
-    }).catch(() => { /* 모델을 못 받으면 사진 상자 그대로 */ });
+  /** 나무 상자들: 사진 재질 상자를 먼저 그려 두고, 모델이 오면 한 번에(인스턴스) 그리고 사진 상자는 숨긴다 */
+  private addCrates(g: THREE.Group, boxes: Box[]) {
+    const fallback = photoMat("brown_planks_03");
+    for (const b of boxes) this.addBox(b, fallback);
+    this.instanced(g, "wooden_crate_02", (bb) => {
+      const size = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
+      const fit = new THREE.Matrix4().makeTranslation(-c.x, -bb.min.y, -c.z);
+      return boxes.map((b) => new THREE.Matrix4().compose(new THREE.Vector3((b.x0 + b.x1) / 2, b.z0, -(b.y0 + b.y1) / 2), new THREE.Quaternion(),
+        new THREE.Vector3((b.x1 - b.x0) / size.x, (b.z1 - b.z0) / size.y, (b.y1 - b.y0) / size.z)).multiply(fit));
+    }).then(() => { fallback.visible = false; }, () => { /* 모델을 못 받으면 사진 상자 그대로 */ });
+  }
+
+  /** 모델 하나를 여러 자리에 그리기 호출 몇 번으로 (부분마다 InstancedMesh). place = 모델 전체 경계 상자 → 자리별 변환 */
+  private instanced(g: THREE.Group, name: string, place: (bb: THREE.Box3) => THREE.Matrix4[], tweak?: (o: THREE.Object3D) => void): Promise<void> {
+    return model(name).then((o) => {
+      tweak?.(o);
+      o.updateMatrixWorld(true);
+      const mats = place(new THREE.Box3().setFromObject(o));
+      o.traverse((c) => {
+        const mesh = c as THREE.Mesh;
+        if (!mesh.isMesh || !mats.length) return;
+        const im = new THREE.InstancedMesh(mesh.geometry.clone().applyMatrix4(mesh.matrixWorld), mesh.material, mats.length);
+        mats.forEach((m, j) => im.setMatrixAt(j, m));
+        im.castShadow = im.receiveShadow = true;
+        g.add(im);
+      });
+    });
   }
 
 
   private buildMap() {
     this.scene.add(this.classic);
     const g = this.classic;
-    // 바닥: 풀밭 사진
-    const ground = new THREE.Mesh(groundGeo(PHYS.MAP_X + 120, PHYS.MAP_Y + 120, PHYS.MAP_X / 2, PHYS.MAP_Y / 2), photoMat("leafy_grass", { tint: 0x9fb488 }));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(PHYS.MAP_X / 2, 0, -PHYS.MAP_Y / 2);
-    ground.receiveShadow = true;
-    g.add(ground);
+    // 하늘에 떠 있는 풀밭 섬 (울타리 밖 12m까지 땅, 그 아래는 바위 절벽) + 구름 바다 + 먼 섬들
+    const grass = photoMat("leafy_grass", { tint: 0x9fb488 });
+    this.island(g, PHYS.MAP_X / 2, PHYS.MAP_Y / 2, PHYS.MAP_X / 2 + 12, PHYS.MAP_Y / 2 + 12, 28, grass, 3);
+    this.skyAround(g, PHYS.MAP_X / 2, PHYS.MAP_Y / 2, 28, grass, photoMat("forest_leaves_02", { scale: 0.35, tint: 0xa8c890 }), 17);
 
     // 맵 테두리 (낮은 나무 울타리, 보기용)
     const planks = photoMat("brown_planks_03");
     for (const [cx, cy, sx, sy] of [[PHYS.MAP_X / 2, -0.1, PHYS.MAP_X + 0.4, 0.2], [PHYS.MAP_X / 2, PHYS.MAP_Y + 0.1, PHYS.MAP_X + 0.4, 0.2],
       [-0.1, PHYS.MAP_Y / 2, 0.2, PHYS.MAP_Y], [PHYS.MAP_X + 0.1, PHYS.MAP_Y / 2, 0.2, PHYS.MAP_Y]] as const) {
-      this.addBox(g, { x0: cx - sx / 2, x1: cx + sx / 2, y0: cy - sy / 2, y1: cy + sy / 2, z0: 0, z1: 0.6, kind: "wall" }, planks);
+      this.addBox({ x0: cx - sx / 2, x1: cx + sx / 2, y0: cy - sy / 2, y1: cy + sy / 2, z0: 0, z1: 0.6, kind: "wall" }, planks);
     }
 
     // 충돌 상자들 (서버와 같은 데이터)에 사진 재질
@@ -137,12 +149,14 @@ export class World3D {
     };
     const cap = photoMat("Concrete034", { tint: 0xa8a49c });
     for (const b of BOXES_BY_MAP.CLASSIC) {
-      if (b.kind === "crate") { this.addCrate(g, b, planks); continue; }
+      if (b.kind === "crate") continue;
       const key = (b.kind === "house" ? `house${b.team}` : b.kind) as keyof typeof mats;
-      this.addBox(g, b, mats[key]);
-      if (b.kind === "wall") this.addCap(g, b, cap);
+      this.addBox(b, mats[key]);
+      if (b.kind === "wall") this.addCap(b, cap);
     }
-    // 울타리 바깥 수풀·바위 (보기용, 맵 밖이라 충돌 없음)
+    this.addCrates(g, BOXES_BY_MAP.CLASSIC.filter((b) => b.kind === "crate"));
+    this.flushPieces(g);
+    // 울타리와 섬 끝 사이 수풀·바위·나무 (보기용, 맵 밖이라 충돌 없음)
     const rnd = seeded(11);
     const ring = (gap: number, near: number, far: number) => {
       const pts: [number, number, number, number][] = [];
@@ -154,11 +168,11 @@ export class World3D {
       }
       return pts;
     };
-    this.scatter(g, "shrub_03", ring(1.6, 0.8, 4).map(([x, y, , r]) => [x, y, 6 + rnd() * 4, r]));
-    this.scatter(g, "rock_07", ring(9, 2, 9).map(([x, y, , r]) => [x, y, 9 + rnd() * 10, r]));
-    this.scatter(g, "rock_09", ring(7, 1, 6).map(([x, y, , r]) => [x, y, 14 + rnd() * 14, r]));
-    // 먼 나무 줄 (안개에 묻혀 보이는 숲 가장자리). 줄기 + 잎 덩어리 두 개 = 그리기 호출 2번
-    const trees = ring(5, 14, 34);
+    this.scatter(g, "shrub_03", ring(2.2, 0.8, 4).map(([x, y, , r]) => [x, y, 6 + rnd() * 4, r]));
+    this.scatter(g, "rock_07", ring(11, 3, 9).map(([x, y, , r]) => [x, y, 4 + rnd() * 4, r]));
+    this.scatter(g, "rock_09", ring(9, 2, 8).map(([x, y, , r]) => [x, y, 6 + rnd() * 6, r]));
+    // 섬 가장자리 나무 줄. 줄기 + 잎 덩어리 두 개 = 그리기 호출 2번
+    const trees = ring(6, 5, 9);
     // UV를 실제 둘레·높이(m)로: 나무껍질이 세로로 길게 늘어나지 않게
     const trunk = new THREE.InstancedMesh(meterUV(new THREE.CylinderGeometry(0.18, 0.28, 3, 6), 1.45, 3).translate(0, 1.5, 0), photoMat("bark_brown_02"), trees.length);
     const crown = new THREE.InstancedMesh(meterUV(new THREE.IcosahedronGeometry(1, 1), 6.3, 3.1), photoMat("forest_leaves_02", { scale: 0.35, tint: 0xa8c890 }), trees.length * 2);
@@ -193,12 +207,9 @@ export class World3D {
   }
 
   /** 담장 위 갓돌 (양옆으로 조금 넓게, 보기용) */
-  private addCap(g: THREE.Group, b: Box, mat: THREE.Material) {
+  private addCap(b: Box, mat: THREE.Material) {
     const cx = (b.x0 + b.x1) / 2, cz = -(b.y0 + b.y1) / 2;
-    const m = new THREE.Mesh(boxGeo(b.x1 - b.x0 + 0.16, 0.12, b.y1 - b.y0 + 0.16, cx, b.z1 + 0.06, cz), mat);
-    m.position.set(cx, b.z1 + 0.06, cz);
-    m.castShadow = m.receiveShadow = true;
-    g.add(m);
+    this.piece(mat, boxGeo(b.x1 - b.x0 + 0.16, 0.12, b.y1 - b.y0 + 0.16, cx, b.z1 + 0.06, cz), cx, b.z1 + 0.06, cz);
   }
 
   /** 건물 장식 조각을 모아 뒀다가 재질별로 한 메시로 합친다 (그리기 호출을 줄여 패드에서도 가볍게) */
@@ -238,52 +249,112 @@ export class World3D {
    * 건물 꾸미기 (충돌 없음: 벽에 붙이거나 건물 속에 묻거나 사람이 못 가는 옥상에만).
    * 2층부터 창문, 옥상 난간, 1층 셔터 문, 옥상 실외기
    */
-  private dressBuilding(g: THREE.Group, b: Box, i: number, win: THREE.Material, trim: THREE.Material) {
+  private dressBuilding(b: Box, i: number, win: THREE.Material, trim: THREE.Material, shutters: THREE.Matrix4[], aircons: THREE.Matrix4[]) {
     const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, sx = b.x1 - b.x0, sy = b.y1 - b.y0, top = b.z1;
     World3D.faces(b).forEach(([x, z, len, rot], f) => {
       this.addWindows(win, x, z, len, rot, top, i * 3 + f);
       // 1층 셔터 문: 면 두 개 중 하나꼴 (문틀 깊이만큼 건물 속에 묻는다)
       if (len >= 5 && (i + f) % 2 === 0) {
-        model("rollershutter_door").then((o) => {
-          const d = new THREE.Group();
-          o.position.set(-1, 0, -0.28);
-          d.add(o);
-          d.position.set(x, 0, z);
-          d.rotation.y = rot;
-          g.add(d);
-        }).catch(() => {});
+        shutters.push(new THREE.Matrix4().makeTranslation(x, 0, z).multiply(new THREE.Matrix4().makeRotationY(rot)).multiply(new THREE.Matrix4().makeTranslation(-1, 0, -0.28)));
       }
     });
     // 옥상 난간 (위로만 0.5m)
     for (const [px, pz, w, d] of [[cx, -b.y0, sx, 0.2], [cx, -b.y1, sx, 0.2], [b.x0, -cy, 0.2, sy], [b.x1, -cy, 0.2, sy]] as const) {
       this.piece(trim, boxGeo(w + 0.2, 0.5, d + 0.2, px, top + 0.25, pz), px, top + 0.25, pz);
     }
-    model("exterior_aircon_unit").then((o) => {
-      o.position.set(cx + sx * 0.18, top + 0.32, -cy + sy * 0.15);
-      o.rotation.y = (i % 4) * Math.PI / 2;
-      g.add(o);
-    }).catch(() => {});
+    aircons.push(new THREE.Matrix4().makeTranslation(cx + sx * 0.18, top + 0.32, -cy + sy * 0.15).multiply(new THREE.Matrix4().makeRotationY((i % 4) * Math.PI / 2)));
   }
 
-  /** NEON 바깥 먼 도시 (보기용, 갈 수 없는 곳). 맵 쪽을 보는 면에만 창문 */
-  private skyline(g: THREE.Group, mat: THREE.Material, win: THREE.Material) {
-    const m = MAPS.NEON, rnd = seeded(5);
-    // 맵 쪽을 보는 면 번호: 남쪽 줄은 북면(1), 북쪽 줄은 남면(0), 서쪽 줄은 동면(2), 동쪽 줄은 서면(3)
-    const inward = [1, 0, 2, 3];
-    for (const side of [0, 1, 2, 3]) {
-      const along = side < 2 ? m.x1 - m.x0 + 60 : m.y1 - m.y0 + 60;
-      for (let t = 0; t < along; ) {
-        const w = 8 + rnd() * 10, d = 8 + rnd() * 8, h = 12 + Math.floor(rnd() * 8) * WINDOW.H, gap = 18 + rnd() * 14;
-        const a = t + w / 2 - 30;
-        // 맵 경계에서 gap m 밖, 변을 따라 늘어선다
-        const [bx, by] = side === 0 ? [m.x0 + a, m.y0 - gap - d / 2] : side === 1 ? [m.x0 + a, m.y1 + gap + d / 2]
-          : side === 2 ? [m.x0 - gap - d / 2, m.y0 + a] : [m.x1 + gap + d / 2, m.y0 + a];
-        const [bw, bd] = side < 2 ? [w, d] : [d, w];
-        const box: Box = { x0: bx - bw / 2, x1: bx + bw / 2, y0: by - bd / 2, y1: by + bd / 2, z0: 0, z1: h, kind: "building" };
-        this.piece(mat, boxGeo(bw, h, bd, bx, h / 2, -by), bx, h / 2, -by);
-        const [x, z, len, rot] = World3D.faces(box)[inward[side]!]!;
-        this.addWindows(win, x, z, len, rot, h, side * 31 + Math.floor(t));
-        t += w + 1 + rnd() * 4;
+  /**
+   * 하늘에 떠 있는 섬: 위는 평평한 땅(top 재질), 아래는 거꾸로 선 바위 덩어리.
+   * cx, cy = 가운데 지도 좌표, ax, ay = 반지름(m), depth = 바위 깊이, y0 = 땅 높이
+   */
+  private island(g: THREE.Group, cx: number, cy: number, ax: number, ay: number, depth: number, top: THREE.Material, seed: number, y0 = 0) {
+    const rnd = seeded(seed), N = 72, K = 7, p1 = rnd() * 6, p2 = rnd() * 6;
+    // 둥근 직사각형 외곽 (초타원 |x/ax|^6 + |y/ay|^6 = 1). 완만한 물결로 바깥으로만 들쭉날쭉 → 울타리 안쪽은 항상 땅
+    const rim: THREE.Vector2[] = [];
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a), j = 1 + 0.025 * (2 + Math.sin(3 * a + p1) + Math.sin(7 * a + p2));
+      rim.push(new THREE.Vector2(cx + ax * j * Math.sign(c) * Math.abs(c) ** (1 / 3), cy + ay * j * Math.sign(s) * Math.abs(s) ** (1 / 3)));
+    }
+    const ground = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(rim)).rotateX(-Math.PI / 2).translate(0, y0, 0), top); // UV = 지도 좌표(m)
+    ground.receiveShadow = true;
+    // 바위: 테두리 고리를 아래로 내려가며 안쪽으로 좁힌다 (k=1은 살짝 바깥 = 튀어나온 턱). UV = 둘레 길이 × 깊이 (m)
+    const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+    let perim = 0;
+    const along = rim.map((p, i) => (perim += i ? p.distanceTo(rim[i - 1]!) : 0));
+    const loop = perim + rim[N - 1]!.distanceTo(rim[0]!);
+    for (let k = 0; k <= K; k++) {
+      const t = k / K, shrink = k === 1 ? 1.03 : 1 - 0.88 * t ** 1.3, y = -depth * t ** 1.15 - (k === 1 ? 0.6 : 0);
+      for (let i = 0; i <= N; i++) {
+        const p = rim[i % N]!, wob = k ? 1 + (rnd() - 0.5) * 0.14 : 1;
+        pos.push(cx + (p.x - cx) * shrink * wob, y0 + y, -(cy + (p.y - cy) * shrink * wob));
+        uv.push(i < N ? along[i]! : loop, -y);
+      }
+    }
+    for (let k = 0; k < K; k++) for (let i = 0; i < N; i++) { const a = k * (N + 1) + i, b = a + N + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); }
+    const tip = pos.length / 3; // 맨 아래 뾰족한 끝
+    pos.push(cx, y0 - depth * 1.25, -cy);
+    uv.push(0, depth * 1.25);
+    for (let i = 0; i < N; i++) { const a = K * (N + 1) + i; idx.push(a, tip, a + 1); }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    this.cliffMat ??= photoMat("cliff_side", { tint: 0xa89a88 });
+    g.add(ground, new THREE.Mesh(geo, this.cliffMat));
+  }
+  private cliffMat?: THREE.Material;
+
+  /** 섬 둘레 하늘: 아래 구름 바다, 섬 둘레 구름 덩어리, 먼 작은 섬들 (모두 그림자·충돌 없음) */
+  private skyAround(g: THREE.Group, cx: number, cy: number, depth: number, top: THREE.Material, leaf: THREE.Material, seed: number) {
+    const rnd = seeded(seed);
+    // 부드러운 흰 구름 무늬 (가장자리를 넘친 덩어리는 반대편에도 그려서 이어 깔아도 이음매가 없다)
+    const blobs = (size: number, n: number, bg: string | null, tile: boolean) => {
+      const c = document.createElement("canvas");
+      c.width = c.height = size;
+      const x = c.getContext("2d")!;
+      if (bg) { x.fillStyle = bg; x.fillRect(0, 0, size, size); }
+      for (let i = 0; i < n; i++) {
+        const r = size * (0.08 + rnd() * 0.16), px = tile ? rnd() * size : size / 2 + (rnd() - 0.5) * size * 0.45, py = tile ? rnd() * size : size / 2 + (rnd() - 0.5) * size * 0.2;
+        for (const ox of tile ? [-size, 0, size] : [0]) for (const oy of tile ? [-size, 0, size] : [0]) {
+          const gr = x.createRadialGradient(px + ox, py + oy, 0, px + ox, py + oy, r);
+          gr.addColorStop(0, "rgba(255,255,255,0.7)");
+          gr.addColorStop(1, "rgba(255,255,255,0)");
+          x.fillStyle = gr;
+          x.fillRect(px + ox - r, py + oy - r, r * 2, r * 2);
+        }
+      }
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+    const seaTex = blobs(256, 70, "#dbe5f0", true);
+    seaTex.wrapS = seaTex.wrapT = THREE.RepeatWrapping;
+    seaTex.repeat.set(10, 10);
+    const sea = new THREE.Mesh(new THREE.CircleGeometry(900, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: seaTex }));
+    sea.position.set(cx, -depth - 30, -cy);
+    g.add(sea);
+    const puff = new THREE.SpriteMaterial({ map: blobs(128, 9, null, false), transparent: true, depthWrite: false, opacity: 0.95 });
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * Math.PI * 2 + rnd() * 0.3, d = 120 + rnd() * 170, s = 50 + rnd() * 70;
+      const sp = new THREE.Sprite(puff);
+      sp.position.set(cx + Math.cos(a) * d, -depth - 10 + rnd() * (depth + 25), -(cy + Math.sin(a) * d));
+      sp.scale.set(s, s * 0.45, 1);
+      g.add(sp);
+    }
+    // 먼 작은 섬: 눈높이보다 조금 아래라 풀밭 윗면과 나무가 보인다
+    const crown = meterUV(new THREE.IcosahedronGeometry(1, 1), 6.3, 3.1);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + 0.5 + rnd() * 0.8, d = 170 + rnd() * 120, x = cx + Math.cos(a) * d, y = cy + Math.sin(a) * d;
+      const rx = 9 + rnd() * 12, ry = 7 + rnd() * 9, y0 = -22 + rnd() * 14;
+      this.island(g, x, y, rx, ry, 0.9 * Math.min(rx, ry) + 6, top, seed * 7 + i, y0);
+      for (let k = 0; k < 4; k++) {
+        const t = new THREE.Mesh(crown, leaf), s = 2.5 + rnd() * 2.5;
+        t.position.set(x + (rnd() - 0.5) * rx, y0 + s * 0.8, -(y + (rnd() - 0.5) * ry));
+        t.scale.set(s, s * 1.2, s);
+        g.add(t);
       }
     }
   }
@@ -327,7 +398,10 @@ export class World3D {
       p.receiveShadow = true;
       g.add(p);
     };
-    floor({ x0: m.x0 - 20, y0: m.y0 - 20, x1: m.x1 + 20, y1: m.y1 + 20 }, photoMat("asphalt_02"), 0);
+    // 하늘에 떠 있는 도시 섬 (울타리 밖 10m까지 아스팔트, 그 아래는 바위 절벽)
+    const asphalt = photoMat("asphalt_02");
+    this.island(g, m.x0 + w / 2, m.y0 + h / 2, w / 2 + 10, h / 2 + 10, 40, asphalt, 7);
+    this.skyAround(g, m.x0 + w / 2, m.y0 + h / 2, 40, photoMat("leafy_grass", { tint: 0x9fb488 }), photoMat("forest_leaves_02", { scale: 0.35, tint: 0xa8c890 }), 23);
     floor(NEON_ZONES.siteA, photoMat("patterned_concrete_pavers", { tint: 0xffd9a0 }), 0.01);
     floor(NEON_ZONES.siteB, photoMat("patterned_concrete_pavers", { tint: 0xb8f0ff }), 0.01);
     const zone = (color: number) => new THREE.MeshStandardMaterial({ color, transparent: true, opacity: 0.3, depthWrite: false, roughness: 1 });
@@ -335,7 +409,7 @@ export class World3D {
     floor(NEON_ZONES.spawnB, zone(0x4fa8ff), 0.02);
     const fenceMat = photoMat("concrete_block_wall", { tint: 0x9aa0b0 });
     for (const [cx, cy, sx, sy] of [[m.x0 + w / 2, -0.1, w + 0.4, 0.2], [m.x0 + w / 2, h + 0.1, w + 0.4, 0.2], [m.x0 - 0.1, h / 2, 0.2, h], [m.x1 + 0.1, h / 2, 0.2, h]] as const) {
-      this.addBox(g, { x0: cx - sx / 2, x1: cx + sx / 2, y0: cy - sy / 2, y1: cy + sy / 2, z0: 0, z1: 1.2, kind: "wall" }, fenceMat);
+      this.addBox({ x0: cx - sx / 2, x1: cx + sx / 2, y0: cy - sy / 2, y1: cy + sy / 2, z0: 0, z1: 1.2, kind: "wall" }, fenceMat);
     }
     // 서버와 같은 충돌 상자에 사진 재질. 건물은 세 가지 외벽(콘크리트·칠한 회벽·붉은 벽돌)을 번갈아
     const facades = [photoMat("concrete_wall_008", { tint: 0x8a8fa0 }), photoMat("PaintedPlaster017", { tint: 0xa89888 }), photoMat("red_brick_03", { tint: 0xa8989c })];
@@ -351,48 +425,49 @@ export class World3D {
       A: photoMat("metal_plate", { tint: 0xffb02e, metal: 0.6, emissive: 0x3a1e00 }),
       B: photoMat("metal_plate", { tint: 0x2ee6ff, metal: 0.6, emissive: 0x00303a }),
     };
-    const planks = photoMat("brown_planks_03");
+    const crates: Box[] = [], shutters: THREE.Matrix4[] = [], aircons: THREE.Matrix4[] = [];
     const win = windowMat(0.8);
     const roofTrim = photoMat("metal_roof", { tint: 0x9a9ca4, metal: 0.4 });
     const wallCap = photoMat("Concrete034", { tint: 0x9c9890 });
-    this.skyline(g, facades[0]!, win);
     const planterBase = photoMat("concrete_block_wall", { tint: 0xc8c4bc });
     const bush = photoMat("forest_leaves_02", { scale: 0.35, tint: 0xa8cc98 });
     const basin = photoMat("stone_tiles", { tint: 0xe0e0e0 });
     const water = new THREE.MeshStandardMaterial({ color: 0x2c5a6e, roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.85 });
     BOXES_BY_MAP.NEON.forEach((b: Box, i) => {
-      if (b.kind === "crate") { this.addCrate(g, b, planks); return; }
+      if (b.kind === "crate") { crates.push(b); return; }
       // 짐 더미: 나무 상자 2단 (가판대·하역장·창고)
       if (b.kind === "cargo") {
         const mid = (b.z0 + b.z1) / 2;
-        this.addCrate(g, { ...b, z1: mid }, planks);
-        this.addCrate(g, { ...b, z0: mid, x0: b.x0 + 0.15, x1: b.x1 - 0.15, y0: b.y0 + 0.15, y1: b.y1 - 0.15 }, planks);
+        crates.push({ ...b, z1: mid }, { ...b, z0: mid, x0: b.x0 + 0.15, x1: b.x1 - 0.15, y0: b.y0 + 0.15, y1: b.y1 - 0.15 });
         return;
       }
       // 화단: 콘크리트 화분 위에 수풀 (충돌 높이 안에 모두 들어감)
       if (b.kind === "planter") {
-        this.addBox(g, { ...b, z1: 0.7 }, planterBase);
-        this.addBox(g, { ...b, x0: b.x0 + 0.1, x1: b.x1 - 0.1, y0: b.y0 + 0.1, y1: b.y1 - 0.1, z0: 0.7 }, bush);
+        this.addBox({ ...b, z1: 0.7 }, planterBase);
+        this.addBox({ ...b, x0: b.x0 + 0.1, x1: b.x1 - 0.1, y0: b.y0 + 0.1, y1: b.y1 - 0.1, z0: 0.7 }, bush);
         return;
       }
       // 분수: 돌 테두리 + 물 + 가운데 기둥
       if (b.kind === "fountain") {
         const t = 0.35;
-        for (const r of [{ y1: b.y0 + t }, { y0: b.y1 - t }, { x1: b.x0 + t }, { x0: b.x1 - t }]) this.addBox(g, { ...b, ...r }, basin);
+        for (const r of [{ y1: b.y0 + t }, { y0: b.y1 - t }, { x1: b.x0 + t }, { x0: b.x1 - t }]) this.addBox({ ...b, ...r }, basin);
         const pool = new THREE.Mesh(new THREE.PlaneGeometry(b.x1 - b.x0 - 2 * t, b.y1 - b.y0 - 2 * t), water);
         pool.rotation.x = -Math.PI / 2;
         pool.position.set((b.x0 + b.x1) / 2, b.z1 - 0.12, -(b.y0 + b.y1) / 2);
         g.add(pool);
         const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
-        this.addBox(g, { ...b, x0: cx - 0.25, x1: cx + 0.25, y0: cy - 0.25, y1: cy + 0.25, z1: 1.6 }, basin);
+        this.addBox({ ...b, x0: cx - 0.25, x1: cx + 0.25, y0: cy - 0.25, y1: cy + 0.25, z1: 1.6 }, basin);
         return;
       }
       const kind = b.kind === "wall" && b.y1 <= 12 ? "shed" : b.site ?? b.kind; // y 12m 아래 = 남쪽 시설(창고)
-      this.addBox(g, b, b.kind === "building" ? facades[i % facades.length]! : mats[kind]!);
-      if (b.kind === "wall") this.addCap(g, b, wallCap);
-      if (b.kind === "building") this.dressBuilding(g, b, i, win, roofTrim);
+      this.addBox(b, b.kind === "building" ? facades[i % facades.length]! : mats[kind]!);
+      if (b.kind === "wall") this.addCap(b, wallCap);
+      if (b.kind === "building") this.dressBuilding(b, i, win, roofTrim, shutters, aircons);
     });
+    this.addCrates(g, crates);
     this.flushPieces(g);
+    this.instanced(g, "rollershutter_door", () => shutters).catch(() => {});
+    this.instanced(g, "exterior_aircon_unit", () => aircons).catch(() => {});
     // 나무 잎 (장식, 충돌은 기둥만)
     const leaf = photoMat("forest_leaves_02", { scale: 0.35, tint: 0xb8d8a8 });
     const pit = photoMat("ground_mixed"); // 나무 밑 흙 (아스팔트 위 2m 칸)
@@ -417,19 +492,12 @@ export class World3D {
       [X(16), 37.6], [X(19), 37.6], [92.4, cellCenter(0, 10).y], // 광장 둘레
       [X(33), 42.4], [X(25), 13.6], [X(33), 13.6], // A 담장, B 담장
     ];
-    model("street_lamp_01").then((proto) => {
-      proto.traverse((o) => {
-        const mat = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
-        if (!mat?.name) return;
-        if (mat.name.endsWith("bulb")) { mat.emissive = new THREE.Color(1, 0.8, 0.55); mat.emissiveIntensity = 30; mat.toneMapped = false; }
-        if (mat.name.endsWith("glass")) { mat.emissive = new THREE.Color(1, 0.75, 0.5); mat.emissiveIntensity = 1.5; }
-      });
-      for (const [x, y] of lamps) {
-        const o = proto.clone();
-        o.position.set(x, 0, -y);
-        g.add(o);
-      }
-    }).catch(() => { /* 모델을 못 받으면 가로등 없이 */ });
+    this.instanced(g, "street_lamp_01", () => lamps.map(([x, y]) => new THREE.Matrix4().makeTranslation(x, 0, -y)), (proto) => proto.traverse((o) => {
+      const mat = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+      if (!mat?.name) return;
+      if (mat.name.endsWith("bulb")) { mat.emissive = new THREE.Color(1, 0.8, 0.55); mat.emissiveIntensity = 30; mat.toneMapped = false; }
+      if (mat.name.endsWith("glass")) { mat.emissive = new THREE.Color(1, 0.75, 0.5); mat.emissiveIntensity = 1.5; }
+    })).catch(() => { /* 모델을 못 받으면 가로등 없이 */ });
     // 사이트 글자 (멀리서도 보이게 건물 위에 떠 있는 판)
     for (const b of BOXES_BY_MAP.NEON) {
       if (!b.site) continue;

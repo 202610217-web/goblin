@@ -145,24 +145,12 @@ export function model(name: string): Promise<THREE.Object3D> {
   return p.then((m) => m.clone());
 }
 
-/** 모델을 상자(가로 sx, 높이 sy, 깊이 sz, 바닥 가운데 = 0) 크기에 맞게 늘린다 */
-export function fitTo(o: THREE.Object3D, sx: number, sy: number, sz: number) {
-  const b = new THREE.Box3().setFromObject(o);
-  const s = b.getSize(new THREE.Vector3());
-  o.scale.set(sx / s.x, sy / s.y, sz / s.z);
-  const c = b.getCenter(new THREE.Vector3());
-  o.position.set(-c.x * o.scale.x, -b.min.y * o.scale.y, -c.z * o.scale.z);
-  const wrap = new THREE.Group();
-  wrap.add(o);
-  return wrap;
-}
-
 // ---------- 하늘·해·그림자·블룸 ----------
 /** 맵별 시간대: 기본 맵 = 맑은 오후, NEON = 늦은 오후. 해는 북쪽(옆)에 둬서 동서로 싸우는 두 팀 누구도 해를 정면으로 보지 않게.
  *  시야 방해를 줄이려고 해를 높게, 하늘 뿌연 정도(turbidity)·안개·환경광은 낮게 둔다 */
 const LIGHTING: Record<MapId, { elevation: number; azimuth: number; turbidity: number; rayleigh: number; exposure: number; sun: number; sunColor: number; fog: number; fogDensity: number; env: number; hemi: number }> = {
-  CLASSIC: { elevation: 50, azimuth: 210, turbidity: 3, rayleigh: 1.2, exposure: 0.5, sun: 3, sunColor: 0xfff1de, fog: 0xc3d3e3, fogDensity: 0.004, env: 0.45, hemi: 0.7 },
-  NEON: { elevation: 48, azimuth: 180, turbidity: 3, rayleigh: 1.5, exposure: 0.45, sun: 2.8, sunColor: 0xffd0a0, fog: 0x8a8490, fogDensity: 0.004, env: 0.55, hemi: 0.8 },
+  CLASSIC: { elevation: 50, azimuth: 210, turbidity: 3, rayleigh: 1.2, exposure: 0.5, sun: 3, sunColor: 0xfff1de, fog: 0xd2dde9, fogDensity: 0.004, env: 0.45, hemi: 0.7 },
+  NEON: { elevation: 48, azimuth: 180, turbidity: 3, rayleigh: 1.5, exposure: 0.45, sun: 2.8, sunColor: 0xffd0a0, fog: 0xb4b2bc, fogDensity: 0.004, env: 0.55, hemi: 0.8 },
 };
 
 export class Lighting {
