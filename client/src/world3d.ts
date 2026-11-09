@@ -356,9 +356,6 @@ export class World3D {
     const roofTrim = photoMat("metal_roof", { tint: 0x9a9ca4, metal: 0.4 });
     const wallCap = photoMat("Concrete034", { tint: 0x9c9890 });
     this.skyline(g, facades[0]!, win);
-    // 건물 모서리 네온 (톤 매핑 없이 밝게 → 블룸으로 번짐. 약한 색 성분은 1 아래로 둬야 흰색으로 안 잘림)
-    const neonA = new THREE.LineBasicMaterial({ color: new THREE.Color(14, 0.6, 11), toneMapped: false });
-    const neonB = new THREE.LineBasicMaterial({ color: new THREE.Color(0.3, 10, 14), toneMapped: false });
     const planterBase = photoMat("concrete_block_wall", { tint: 0xc8c4bc });
     const bush = photoMat("forest_leaves_02", { scale: 0.35, tint: 0xa8cc98 });
     const basin = photoMat("stone_tiles", { tint: 0xe0e0e0 });
@@ -391,14 +388,9 @@ export class World3D {
         return;
       }
       const kind = b.kind === "wall" && b.y1 <= 12 ? "shed" : b.site ?? b.kind; // y 12m 아래 = 남쪽 시설(창고)
-      const mesh = this.addBox(g, b, b.kind === "building" ? facades[i % facades.length]! : mats[kind]!);
+      this.addBox(g, b, b.kind === "building" ? facades[i % facades.length]! : mats[kind]!);
       if (b.kind === "wall") this.addCap(g, b, wallCap);
-      if (b.kind === "building") {
-        this.dressBuilding(g, b, i, win, roofTrim);
-        const line = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry), i % 2 ? neonA : neonB);
-        line.position.copy(mesh.position);
-        g.add(line);
-      }
+      if (b.kind === "building") this.dressBuilding(g, b, i, win, roofTrim);
     });
     this.flushPieces(g);
     // 나무 잎 (장식, 충돌은 기둥만)

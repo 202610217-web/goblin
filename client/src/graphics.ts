@@ -158,10 +158,11 @@ export function fitTo(o: THREE.Object3D, sx: number, sy: number, sz: number) {
 }
 
 // ---------- 하늘·해·그림자·블룸 ----------
-/** 맵별 시간대: 기본 맵 = 맑은 오후, NEON = 늦은 오후. 해는 북쪽(옆)에 둬서 동서로 싸우는 두 팀 누구도 해를 정면으로 보지 않게 */
+/** 맵별 시간대: 기본 맵 = 맑은 오후, NEON = 늦은 오후. 해는 북쪽(옆)에 둬서 동서로 싸우는 두 팀 누구도 해를 정면으로 보지 않게.
+ *  시야 방해를 줄이려고 해를 높게, 하늘 뿌연 정도(turbidity)·안개·환경광은 낮게 둔다 */
 const LIGHTING: Record<MapId, { elevation: number; azimuth: number; turbidity: number; rayleigh: number; exposure: number; sun: number; sunColor: number; fog: number; fogDensity: number; env: number; hemi: number }> = {
-  CLASSIC: { elevation: 38, azimuth: 210, turbidity: 4, rayleigh: 1.2, exposure: 0.55, sun: 3.2, sunColor: 0xfff1de, fog: 0xc3d3e3, fogDensity: 0.006, env: 0.45, hemi: 0.7 },
-  NEON: { elevation: 30, azimuth: 180, turbidity: 8, rayleigh: 2.2, exposure: 0.5, sun: 3, sunColor: 0xffc08a, fog: 0x9a8088, fogDensity: 0.009, env: 0.8, hemi: 1.3 },
+  CLASSIC: { elevation: 50, azimuth: 210, turbidity: 3, rayleigh: 1.2, exposure: 0.5, sun: 3, sunColor: 0xfff1de, fog: 0xc3d3e3, fogDensity: 0.004, env: 0.45, hemi: 0.7 },
+  NEON: { elevation: 48, azimuth: 180, turbidity: 3, rayleigh: 1.5, exposure: 0.45, sun: 2.8, sunColor: 0xffd0a0, fog: 0x8a8490, fogDensity: 0.004, env: 0.55, hemi: 0.8 },
 };
 
 export class Lighting {
@@ -256,8 +257,8 @@ export class Lighting {
     const u = (this.sky.material as THREE.ShaderMaterial).uniforms;
     u.turbidity!.value = L.turbidity;
     u.rayleigh!.value = L.rayleigh;
-    u.mieCoefficient!.value = 0.003;
-    u.mieDirectionalG!.value = 0.7;
+    u.mieCoefficient!.value = 0.0015; // 해 둘레 번짐을 작고 약하게
+    u.mieDirectionalG!.value = 0.8;
     this.sunDir.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - L.elevation), THREE.MathUtils.degToRad(L.azimuth));
     u.sunPosition!.value.copy(this.sunDir);
     this.sun.color.setHex(L.sunColor);
