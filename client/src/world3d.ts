@@ -12,6 +12,7 @@ import { CONFIG } from "./config";
 import { Lighting, WINDOW, boxGeo, groundGeo, meterUV, model, photoMat, windowMat } from "./graphics";
 import { Character, PROPS, type Pose } from "./characters";
 import { StylizedFx } from "./ultfx";
+import { grassField, wind } from "./grass";
 
 const tmp = new THREE.Vector3();
 /** 만화풍 명암 3단계 (MeshToonMaterial) */
@@ -131,6 +132,11 @@ export class World3D {
     const grass = photoMat("leafy_grass", { tint: 0x9fb488 });
     this.island(g, PHYS.MAP_X / 2, PHYS.MAP_Y / 2, PHYS.MAP_X / 2 + 12, PHYS.MAP_Y / 2 + 12, 28, grass, 3);
     this.skyAround(g, PHYS.MAP_X / 2, PHYS.MAP_Y / 2, 28, grass, photoMat("forest_leaves_02", { scale: 0.35, tint: 0xa8c890 }), 17);
+    // 진짜 풀잎: 섬 땅 위 어디든 (집·담·단상 같은 바닥에 붙은 상자 안은 빼고)
+    const ax = PHYS.MAP_X / 2 + 12, ay = PHYS.MAP_Y / 2 + 12, solid = BOXES_BY_MAP.CLASSIC.filter((b) => b.z0 < 0.05);
+    g.add(grassField(PHYS.MAP_X / 2 - ax, PHYS.MAP_Y / 2 - ay, PHYS.MAP_X / 2 + ax, PHYS.MAP_Y / 2 + ay, (x, y) =>
+      ((x - PHYS.MAP_X / 2) / ax) ** 6 + ((y - PHYS.MAP_Y / 2) / ay) ** 6 < 0.97
+      && !solid.some((b) => x > b.x0 - 0.15 && x < b.x1 + 0.15 && y > b.y0 - 0.15 && y < b.y1 + 0.15), 29));
 
     // 맵 테두리 (낮은 나무 울타리, 보기용)
     const planks = photoMat("brown_planks_03");
@@ -223,7 +229,8 @@ export class World3D {
   private flushPieces(g: THREE.Group) {
     for (const [mat, list] of this.pieces) {
       const m = new THREE.Mesh(mergeGeometries(list), mat);
-      m.castShadow = m.receiveShadow = !(mat as THREE.MeshStandardMaterial).emissiveMap; // 창문 판은 그림자 없음
+      m.receiveShadow = !(mat as THREE.MeshStandardMaterial).emissiveMap; // 창문 판은 그림자 없음
+      m.castShadow = m.receiveShadow && !mat.transparent && !mat.polygonOffset; // 바닥에 붙인 칠·맨홀도 그림자 없음
       g.add(m);
     }
     this.pieces.clear();
@@ -359,6 +366,75 @@ export class World3D {
     }
   }
 
+  /**
+   * 아스팔트 길답게: 닳은 노란 가운데 선·흰 횡단보도, 맨홀 뚜껑, 하늘이 비치는 물웅덩이 (모두 바닥에 붙은 얇은 판, 충돌 없음).
+   * shortcut: 선·횡단보도·맨홀·웅덩이 자리는 지금 NEON 격자를 보고 손으로 정함, 맵을 고치면 같이 옮겨야 함
+   */
+  private roadDetails(g: THREE.Group) {
+    const rnd = seeded(41);
+    // 칠이 군데군데 벗겨진 무늬 (흰 = 남은 칠)
+    const wear = (() => {
+      const c = document.createElement("canvas");
+      c.width = c.height = 128;
+      const x = c.getContext("2d")!;
+      x.fillStyle = "#fff"; x.fillRect(0, 0, 128, 128);
+      for (let i = 0; i < 260; i++) { x.fillStyle = `rgba(0,0,0,${0.15 + rnd() * 0.5})`; x.beginPath(); x.arc(rnd() * 128, rnd() * 128, 1 + rnd() * 5, 0, 7); x.fill(); }
+      const t = new THREE.CanvasTexture(c);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      return t;
+    })();
+    const paint = (color: number) => new THREE.MeshStandardMaterial({ color, roughness: 0.55, alphaMap: wear, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    const yellow = paint(0xd8b030), white = paint(0xe8e6e0);
+    const strip = (mat: THREE.Material, x: number, y: number, w: number, h: number) => this.piece(mat, new THREE.PlaneGeometry(w, h).rotateX(-Math.PI / 2), x, 0.012, -y);
+    const X = (c: number) => cellCenter(c, 0).x - CELL / 2, Y = (s: number) => s * CELL; // 칸 왼쪽·아래 모서리
+    // 가운데 점선 (사이트 보도블록 위는 피함): 시장 거리(s 12~14 가운데), 서쪽 중앙길(s 13~14 사이)
+    for (const [c0, c1, y] of [[29, 43, Y(13) + CELL / 2], [6, 12, Y(14)]] as const) {
+      for (let x = X(c0) + 0.5; x + 2 < X(c1 + 1); x += 4) strip(yellow, x + 1, y, 2, 0.14);
+    }
+    // 횡단보도 (길을 가로지르는 흰 줄무늬): 시장 거리 양 끝
+    for (const [cx, s0, s1] of [[30, 12, 14], [43, 12, 14]] as const) {
+      for (let y = Y(s0) + 0.3; y + 0.5 < Y(s1 + 1); y += 0.9) strip(white, X(cx) + CELL / 2, y + 0.25, 2.6, 0.5);
+    }
+    // 맨홀 뚜껑: 무쇠 원판 (격자 무늬를 그려서)
+    const lid = (() => {
+      const c = document.createElement("canvas");
+      c.width = c.height = 128;
+      const x = c.getContext("2d")!;
+      x.fillStyle = "#3a3836"; x.fillRect(0, 0, 128, 128);
+      x.strokeStyle = "#5a5652"; x.lineWidth = 5;
+      for (let i = 12; i < 128; i += 16) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 128); x.moveTo(0, i); x.lineTo(128, i); x.stroke(); }
+      x.lineWidth = 8; x.strokeStyle = "#2a2826"; x.beginPath(); x.arc(64, 64, 58, 0, 7); x.stroke();
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      return new THREE.MeshStandardMaterial({ map: t, metalness: 0.6, roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -2 });
+    })();
+    for (const [c, s] of [[36, 13], [20, 6], [10, 19], [40, 22], [25, 15]] as const) {
+      const p = cellCenter(c, s);
+      this.piece(lid, new THREE.CircleGeometry(0.42, 20).rotateX(-Math.PI / 2), p.x, 0.014, -p.y);
+    }
+    // 물웅덩이: 거의 매끈한 어두운 면 → 환경광(하늘)이 비친다. 가장자리는 부드럽게 사라짐
+    const blob = (() => {
+      const c = document.createElement("canvas");
+      c.width = c.height = 64;
+      const x = c.getContext("2d")!;
+      for (let i = 0; i < 6; i++) {
+        const px = 20 + rnd() * 24, py = 20 + rnd() * 24, r = 10 + rnd() * 10;
+        const gr = x.createRadialGradient(px, py, 0, px, py, r);
+        gr.addColorStop(0, "#fff"); gr.addColorStop(0.7, "#fff"); gr.addColorStop(1, "rgba(255,255,255,0)");
+        x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+      }
+      return new THREE.CanvasTexture(c);
+    })();
+    const water = new THREE.MeshStandardMaterial({ color: 0x323a44, roughness: 0.03, opacity: 0.85, metalness: 0, envMapIntensity: 1.6, alphaMap: blob, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
+    for (const [c, s] of [[31, 12.5], [24, 19], [9, 3], [44, 10], [27, 8], [44, 19], [19, 14], [8, 15]] as const) {
+      const p = cellCenter(c, s), w = 1.6 + rnd() * 1.6;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * (0.5 + rnd() * 0.4)).rotateX(-Math.PI / 2).rotateY(rnd() * Math.PI), water);
+      m.position.set(p.x, 0.016, -p.y);
+      m.receiveShadow = true;
+      g.add(m);
+    }
+  }
+
   /** 모델의 각 부분을 자리마다 하나씩 돌려 가며 한꺼번에 그린다 (InstancedMesh = 그리기 호출 몇 번). pts = [x, y, 크기, 회전] */
   private scatter(g: THREE.Group, name: string, pts: [number, number, number, number][]) {
     model(name).then((o) => {
@@ -399,7 +475,7 @@ export class World3D {
       g.add(p);
     };
     // 하늘에 떠 있는 도시 섬 (울타리 밖 10m까지 아스팔트, 그 아래는 바위 절벽)
-    const asphalt = photoMat("asphalt_02");
+    const asphalt = photoMat("asphalt_02", { normal: 1.6 }); // 골재 알갱이·갈라짐이 도드라지게
     this.island(g, m.x0 + w / 2, m.y0 + h / 2, w / 2 + 10, h / 2 + 10, 40, asphalt, 7);
     this.skyAround(g, m.x0 + w / 2, m.y0 + h / 2, 40, photoMat("leafy_grass", { tint: 0x9fb488 }), photoMat("forest_leaves_02", { scale: 0.35, tint: 0xa8c890 }), 23);
     floor(NEON_ZONES.siteA, photoMat("patterned_concrete_pavers", { tint: 0xffd9a0 }), 0.01);
@@ -464,6 +540,7 @@ export class World3D {
       if (b.kind === "wall") this.addCap(b, wallCap);
       if (b.kind === "building") this.dressBuilding(b, i, win, roofTrim, shutters, aircons);
     });
+    this.roadDetails(g);
     this.addCrates(g, crates);
     this.flushPieces(g);
     this.instanced(g, "rollershutter_door", () => shutters).catch(() => {});
@@ -583,6 +660,7 @@ export class World3D {
   }
 
   render() {
+    wind.value = performance.now() / 1000;
     this.light.render();
   }
 
